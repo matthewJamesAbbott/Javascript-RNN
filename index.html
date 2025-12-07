@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Multi-Layer RNN Trainer</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 2rem; }
+        .section { margin-bottom: 2rem; border-bottom: 1px solid #ccc; padding-bottom: 1rem; }
+        label { display: block; margin-top: 0.5rem; }
+        .results { background-color: #f5f5f5; padding: 1rem; margin: 1rem 0; border-radius: 5px; }
+        .metric { margin: 0.5rem 0; font-weight: bold; }
+        table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+    </style>
+</head>
+<body>
+    <h1>Multi-Layer RNN Trainer</h1>
+
+    <div class="section">
+        <h2>Network Configuration</h2>
+        <label>Input Size: <input type="number" id="inputSize" value="4" min="1"></label>
+        <label>Hidden Layer Sizes (comma separated): <input type="text" id="hiddenSizes" value="6"></label>
+        <label>Output Size: <input type="number" id="outputSize" value="3" min="1"></label>
+        <label>Learning Rate: <input type="number" id="learningRate" value="0.1" step="0.01" min="0.001" max="1"></label>
+        <button onclick="createNetwork()">Create Network</button>
+        <span id="networkStatus" style="margin-left:1rem;"></span>
+    </div>
+
+    <div class="section">
+        <h2>Load Training Data</h2>
+        <input type="file" id="csvFile" accept=".csv">
+        <button onclick="loadCSV()">Load CSV File</button>
+        <span id="dataStatus"></span><br>
+        <label>Or paste CSV data (one timestep per line):</label>
+        <textarea id="csvPaste" rows="5" cols="60"></textarea>
+        <button onclick="loadCSVText()">Load Pasted CSV</button>
+    </div>
+
+    <div class="section">
+        <h2>Save/Load Network</h2>
+        <button onclick="saveNetwork()">Save Network (.json)</button>
+        <button onclick="loadNetwork()">Load Network (.json)</button>
+        <input type="file" id="modelFile" accept=".json" style="display:none;">
+        <span id="modelStatus"></span>
+    </div>
+
+    <div class="section">
+        <h2>Train Network</h2>
+        <label>Epochs: <input type="number" id="epochs" value="200" min="1" max="10000"></label>
+        <button onclick="trainNetwork()">Train RNN</button>
+        <span id="trainStatus"></span>
+    </div>
+
+    <div class="section">
+        <h2>Predict</h2>
+        <label>Input Sequence (rows comma-separated, e.g. <span style="font-family:monospace">0.1,0.4;0.5,0.7;...</span>):<br>
+        <textarea id="predictSeq" rows="3" cols="40">0.19,0.21;0.32,0.43;0.54,0.65;0.77,0.88;0.99,0.01</textarea></label><br>
+        <button onclick="predictSequence()">Predict Sequence</button>
+        <div id="predictOutput"></div>
+    </div>
+
+    <script>
+        class TNeuron {
+            constructor(numInputs, recurrent) {
+                this.weights = new Array(numInputs).fill(0).map(() => Math.random() - 0.5);
+                this.recurrentWeight = recurrent ? (Math.random() - 0.5) : 0.0;
+                this.bias = Math.random() - 0.5;
+                this.output = 0;
+                this.prevOutput = 0;
+                this.error = 0;
+            }
+
+            toJSON() {
+                return {
+                    weights: this.weights,
+                    recurrentWeight: this.recurrentWeight,
+                    bias: this.bias,
+                };
+            }
+
+            static fromJSON(json) {
+                const neuron = new TNeuron(json.weights.length, json.recurrentWeight !== 0);
+                neuron.weights = json.weights;
+                neuron.recurrentWeight = json.recurrentWeight;
+                neuron.bias = json.bias;
+                return neuron;
+            }
+        }
+
+        class TLayer {
+            constructor(numNeurons, numInputs, recurrent = false) {
+                this.neurons = [];
+                for (let i = 0; i < numNeurons; i++) {
+                    this.neurons.push(new TNeuron(numInputs, recurrent));
+                }
+            }
+
+            toJSON() {
+                return {
+                    neurons: this.neurons.map(n => n.toJSON())
+                };
+            }
+
+            static fromJSON(json, numInputs, recurrent = false) {
+                const layer = new TLayer(json.neurons.length, numInputs, recurrent);
+                for (let i = 0; i < json.neurons.length; i++) {
+                    layer.neurons[i] = TNeuron.fromJSON(json.neurons[i]);
+                }
+                return layer;
+            }
+        }
+
+        class TMultiLayerRNN {
+            constructor(inputSize, hiddenSizes, outputSize, learningRate = 0.1) {
+                this.learningRate = learningRate;
+                this.inputLayer = new TLayer(inputSize, inputSize, false);
+                this.hiddenLayers = [];
+                let prevSize = inputSize;
+                for (let i = 0; i < hiddenSizes.length; i++) {
+                    this.hiddenLayers.push(new TLayer(hiddenSizes[i], prevSize, true));
+                    prevSize = hiddenSizes[i];
+                }
+                this.outputLayer = new TLayer(outputSize, prevSize, false);
+                this.maxIterations = 200;
+            }
+
+            resetHiddenStates() {
+                for (let k = 0; k < this.hiddenLayers.length; k++) {
+                    for (let n = 0; n < this.hiddenLayers[k].neurons.length; n++) {
+                        this.hiddenLayers[k].neurons[n].prevOutput = 0;
+                    }
+                }
+            }
+
+            stepHiddenState() {
+                for (let k = 0; k < this.hiddenLayers.length; k++) {
+                    for (let n = 0; n < this.hiddenLayers[k].neurons.length; n++) {
+                        this.hiddenLayers[k].neurons[n].prevOutput = this.hiddenLayers[k].neurons[n].output;
+                    }
+                }
+            }
+
+            feedForwardStep(input) {
+                for (let i = 0; i < this.inputLayer.neurons.length; i++) {
+                    this.inputLayer.neurons[i].output = input[i];
+                }
+                for (let k = 0; k < this.hiddenLayers.length; k++) {
+                    let prevOutputs = k === 0 ?
+                        this.inputLayer.neurons.map(n => n.output)
+                        : this.hiddenLayers[k - 1].neurons.map(n => n.output);
+
+                    for (let i = 0; i < this.hiddenLayers[k].neurons.length; i++) {
+                        let neuron = this.hiddenLayers[k].neurons[i];
+                        let sum = neuron.bias;
+                        for (let j = 0; j < prevOutputs.length; j++)
+                            sum += prevOutputs[j] * neuron.weights[j];
+                        sum += neuron.prevOutput * neuron.recurrentWeight;
+                        neuron.output = 1.0 / (1 + Math.exp(-sum));
+                    }
+                }
+                let lastHidden = this.hiddenLayers[this.hiddenLayers.length - 1];
+                let prevOutputs = lastHidden.neurons.map(n => n.output);
+                for (let i = 0; i < this.outputLayer.neurons.length; i++) {
+                    let neuron = this.outputLayer.neurons[i];
+                    let sum = neuron.bias;
+                    for (let j = 0; j < prevOutputs.length; j++)
+                        sum += prevOutputs[j] * neuron.weights[j];
+                    neuron.output = 1.0 / (1 + Math.exp(-sum));
+                }
+                this.stepHiddenState();
+            }
+
+            backPropagate(target) {
+                for (let i = 0; i < this.outputLayer.neurons.length; i++) {
+                    let neuron = this.outputLayer.neurons[i];
+                    neuron.error = neuron.output * (1 - neuron.output) * (target[i] - neuron.output);
+                }
+                for (let k = this.hiddenLayers.length - 1; k >= 0; k--) {
+                    for (let i = 0; i < this.hiddenLayers[k].neurons.length; i++) {
+                        let neuron = this.hiddenLayers[k].neurons[i];
+                        let errorSum = 0;
+                        if (k === this.hiddenLayers.length - 1) {
+                            for (let j = 0; j < this.outputLayer.neurons.length; j++)
+                                errorSum += this.outputLayer.neurons[j].error * this.outputLayer.neurons[j].weights[i];
+                        } else {
+                            for (let j = 0; j < this.hiddenLayers[k + 1].neurons.length; j++)
+                                errorSum += this.hiddenLayers[k + 1].neurons[j].error * this.hiddenLayers[k + 1].neurons[j].weights[i];
+                        }
+                        neuron.error = neuron.output * (1 - neuron.output) * errorSum;
+                    }
+                }
+            }
+
+            updateWeights(input) {
+                let lastHidden = this.hiddenLayers[this.hiddenLayers.length - 1];
+                let prevOutputs = lastHidden.neurons.map(n => n.output);
+                for (let i = 0; i < this.outputLayer.neurons.length; i++) {
+                    let neuron = this.outputLayer.neurons[i];
+                    for (let j = 0; j < neuron.weights.length; j++)
+                        neuron.weights[j] += this.learningRate * neuron.error * prevOutputs[j];
+                    neuron.bias += this.learningRate * neuron.error;
+                }
+                for (let k = this.hiddenLayers.length - 1; k >= 0; k--) {
+                    let prev = k === 0 ? this.inputLayer.neurons.map(n => n.output)
+                                       : this.hiddenLayers[k - 1].neurons.map(n => n.output);
+
+                    for (let i = 0; i < this.hiddenLayers[k].neurons.length; i++) {
+                        let neuron = this.hiddenLayers[k].neurons[i];
+                        for (let j = 0; j < neuron.weights.length; j++)
+                            neuron.weights[j] += this.learningRate * neuron.error * prev[j];
+
+                        neuron.recurrentWeight += this.learningRate * neuron.error * neuron.prevOutput;
+                        neuron.bias += this.learningRate * neuron.error;
+                    }
+                }
+            }
+
+            predictSequence(sequence) {
+                this.resetHiddenStates();
+                let results = [];
+                for (let t = 0; t < sequence.length; t++) {
+                    this.feedForwardStep(sequence[t]);
+                    results.push(this.outputLayer.neurons.map(n => n.output));
+                }
+                return results;
+            }
+
+            trainSequence(inputs, targets) {
+                this.resetHiddenStates();
+                for (let t = 0; t < inputs.length; t++) {
+                    this.feedForwardStep(inputs[t]);
+                    this.backPropagate(targets[t]);
+                    this.updateWeights(inputs[t]);
+                }
+            }
+
+            toJSON() {
+                return JSON.stringify({
+                    learningRate: this.learningRate,
+                    inputSize: this.inputLayer.neurons.length,
+                    hiddenSizes: this.hiddenLayers.map(l => l.neurons.length),
+                    outputSize: this.outputLayer.neurons.length,
+                    hiddenLayers: this.hiddenLayers.map((layer, i) =>
+                        layer.toJSON()
+                    ),
+                    outputLayer: this.outputLayer.toJSON()
+                });
+            }
+
+            static fromJSON(jsonStr) {
+                let obj = JSON.parse(jsonStr);
+                let net = new TMultiLayerRNN(obj.inputSize, obj.hiddenSizes, obj.outputSize, obj.learningRate);
+                // Hidden layers
+                for (let k = 0; k < obj.hiddenLayers.length; k++) {
+                    let prevSize = k === 0 ? obj.inputSize : obj.hiddenSizes[k-1];
+                    net.hiddenLayers[k] = TLayer.fromJSON(obj.hiddenLayers[k], prevSize, true);
+                }
+                // Output layer
+                let lastHiddenSize = obj.hiddenSizes[obj.hiddenSizes.length-1];
+                net.outputLayer = TLayer.fromJSON(obj.outputLayer, lastHiddenSize, false);
+                net.learningRate = obj.learningRate;
+                return net;
+            }
+        }
+
+        // Global data arrays for training (like MLP)
+        let rnn = null;
+        let inputs = [];   // [ [input_timestep], ... ]
+        let targets = [];  // [ [target_timestep], ... ]
+
+        function createNetwork() {
+            const inputSize = parseInt(document.getElementById("inputSize").value);
+            const hiddenSizes = document.getElementById("hiddenSizes").value.split(",").map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+            const outputSize = parseInt(document.getElementById("outputSize").value);
+            const learningRate = parseFloat(document.getElementById("learningRate").value);
+            rnn = new TMultiLayerRNN(inputSize, hiddenSizes, outputSize, learningRate);
+            document.getElementById("networkStatus").textContent = "RNN Created: " +
+                `Input=${inputSize}, Hidden=[${hiddenSizes.join(',')}], Output=${outputSize}, LR=${learningRate}`;
+        }
+
+        // CSV Import (matches MLP style)
+        function parseCSV(text, inputSize, outputSize) {
+            let lines = text.trim().split("\n");
+            let seqInputs = [], seqTargets = [];
+            for (let line of lines) {
+                if (line.trim() === "") continue;
+                let arr = line.trim().split(",").map(Number);
+                let input = arr.slice(0, inputSize);
+                let target = arr.slice(inputSize, inputSize + outputSize);
+                // Fallback: if no targets, use input as target (identity)
+                if (target.length < outputSize) {
+                    for (let j = target.length; j < outputSize; j++)
+                        target[j] = (input[j % input.length] || 0.0);
+                }
+                seqInputs.push(input);
+                seqTargets.push(target);
+            }
+            return {inputs: seqInputs, targets: seqTargets};
+        }
+
+        function loadCSV() {
+            const file = document.getElementById('csvFile').files[0];
+            if (!file) {
+                document.getElementById('dataStatus').textContent = "No file selected.";
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const inputSize = parseInt(document.getElementById("inputSize").value);
+                const outputSize = parseInt(document.getElementById("outputSize").value);
+                let {inputs: inp, targets: tar} = parseCSV(e.target.result, inputSize, outputSize);
+                inputs = inp; targets = tar;
+                document.getElementById('dataStatus').textContent = "Loaded " + inputs.length + " timesteps from CSV.";
+            };
+            reader.readAsText(file);
+        }
+
+        function loadCSVText() {
+            const text = document.getElementById('csvPaste').value;
+            if (!text || text.trim() === "") {
+                document.getElementById('dataStatus').textContent = "No data pasted.";
+                return;
+            }
+            const inputSize = parseInt(document.getElementById("inputSize").value);
+            const outputSize = parseInt(document.getElementById("outputSize").value);
+            let {inputs: inp, targets: tar} = parseCSV(text, inputSize, outputSize);
+            inputs = inp; targets = tar;
+            document.getElementById('dataStatus').textContent = "Loaded " + inputs.length + " timesteps from pasted CSV.";
+        }
+
+        // Saving/loading network (like the MLP demo)
+        function saveNetwork() {
+            if (!rnn) return alert("Create an RNN first.");
+            const blob = new Blob([rnn.toJSON()], {type: "application/json"});
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = "rnn-network.json";
+            a.click();
+            document.getElementById('modelStatus').textContent = "Network saved.";
+        }
+
+        function loadNetwork() {
+            document.getElementById('modelFile').onchange = function(evt) {
+                const file = evt.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    rnn = TMultiLayerRNN.fromJSON(e.target.result);
+                    document.getElementById('modelStatus').textContent = "Network loaded!";
+                };
+                reader.readAsText(file);
+            };
+            document.getElementById('modelFile').click();
+        }
+
+        function trainNetwork() {
+            if (!rnn) return alert("Create an RNN first.");
+            if (!inputs.length || !targets.length)
+                return alert("Load CSV data or paste a sequence first.");
+            const epochs = parseInt(document.getElementById("epochs").value);
+            for (let epoch = 1; epoch <= epochs; epoch++) {
+                rnn.trainSequence(inputs, targets);
+            }
+            // Report
+            let preds = rnn.predictSequence(inputs);
+            let out = "<pre>";
+            out += "t | Inputs | Predictions | Targets\n";
+            out += "-".repeat(60) + "\n";
+            for (let t = 0; t < inputs.length; t++) {
+                out += t + " | "
+                    + inputs[t].map(v => v.toFixed(4)).join(" ")
+                    + " | "
+                    + preds[t].map(v => v.toFixed(4)).join(" ")
+                    + " | "
+                    + targets[t].map(v => v.toFixed(4)).join(" ") + "\n";
+            }
+            out += "</pre>";
+            document.getElementById("trainStatus").innerHTML = out;
+        }
+
+        function parseSequenceInput(str) {
+            // Accept "a,b;c,d;..." or one row per line
+            return str.trim().split(/[\n;]/).map(line =>
+                line.trim().split(",").map(v => parseFloat(v.trim())).filter(x => !isNaN(x))
+            ).filter(arr => arr.length > 0);
+        }
+
+        function predictSequence() {
+            if (!rnn) {
+                document.getElementById("predictOutput").textContent = "Create RNN first!";
+                return;
+            }
+            const seqStr = document.getElementById("predictSeq").value;
+            const seq = parseSequenceInput(seqStr);
+            const preds = rnn.predictSequence(seq);
+
+            let out = "<pre>";
+            out += "t | Inputs | Predictions\n";
+            out += "-".repeat(40) + "\n";
+            for (let t = 0; t < seq.length; t++) {
+                out += t + " | " + seq[t].map(x => x.toFixed(4)).join(" ") + " | " + preds[t].map(x => x.toFixed(4)).join(" ") + "\n";
+            }
+            out += "</pre>";
+            document.getElementById("predictOutput").innerHTML = out;
+        }
+    </script>
+</body>
+</html>
