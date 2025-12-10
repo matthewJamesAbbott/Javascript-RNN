@@ -1,9 +1,20 @@
+<!--
+  Multi-Layer RNN Trainer
+  This file provides a web-based, interactive simple RNN that supports:
+    - Network design (input/hidden/output sizes, learning rate)
+    - CSV or pasted sequence training data
+    - In-browser training with feedback and predictions
+    - Saving/loading model state as .json files
+    - Full JavaScript RNN implementation for demonstration/teaching
+-->
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <title>Multi-Layer RNN Trainer</title>
     <style>
+        /* Nicely formatted page styling for easy reading */
         body { font-family: Arial, sans-serif; margin: 2rem; }
         .section { margin-bottom: 2rem; border-bottom: 1px solid #ccc; padding-bottom: 1rem; }
         label { display: block; margin-top: 0.5rem; }
@@ -16,27 +27,35 @@
 </head>
 <body>
     <h1>Multi-Layer RNN Trainer</h1>
-
+    <!-- === Network construction panel === -->
     <div class="section">
         <h2>Network Configuration</h2>
+        <!-- Number of input values per timestep -->
         <label>Input Size: <input type="number" id="inputSize" value="4" min="1"></label>
+        <!-- How many hidden neurons per layer, e.g. "10,10" for 2 hidden layers of size 10 -->
         <label>Hidden Layer Sizes (comma separated): <input type="text" id="hiddenSizes" value="6"></label>
+        <!-- Number of outputs at each timestep -->
         <label>Output Size: <input type="number" id="outputSize" value="3" min="1"></label>
+        <!-- How fast the network learns -->
         <label>Learning Rate: <input type="number" id="learningRate" value="0.1" step="0.01" min="0.001" max="1"></label>
         <button onclick="createNetwork()">Create Network</button>
         <span id="networkStatus" style="margin-left:1rem;"></span>
     </div>
 
+    <!-- === Training data loading UI === -->
     <div class="section">
         <h2>Load Training Data</h2>
+        <!-- Load from csv file drop -->
         <input type="file" id="csvFile" accept=".csv">
         <button onclick="loadCSV()">Load CSV File</button>
         <span id="dataStatus"></span><br>
+        <!-- Or from pasted string/text area -->
         <label>Or paste CSV data (one timestep per line):</label>
         <textarea id="csvPaste" rows="5" cols="60"></textarea>
         <button onclick="loadCSVText()">Load Pasted CSV</button>
     </div>
 
+    <!-- === Save/load neural network model state === -->
     <div class="section">
         <h2>Save/Load Network</h2>
         <button onclick="saveNetwork()">Save Network (.json)</button>
@@ -45,6 +64,7 @@
         <span id="modelStatus"></span>
     </div>
 
+    <!-- === Start training after loading/building === -->
     <div class="section">
         <h2>Train Network</h2>
         <label>Epochs: <input type="number" id="epochs" value="200" min="1" max="10000"></label>
@@ -52,6 +72,7 @@
         <span id="trainStatus"></span>
     </div>
 
+    <!-- === Prediction (sequence input/predict) UI === -->
     <div class="section">
         <h2>Predict</h2>
         <label>Input Sequence (rows comma-separated, e.g. <span style="font-family:monospace">0.1,0.4;0.5,0.7;...</span>):<br>
@@ -61,16 +82,17 @@
     </div>
 
     <script>
+        /** === RNN neuron: can be standard or have a recurrent feedback connection === */
         class TNeuron {
             constructor(numInputs, recurrent) {
-                this.weights = new Array(numInputs).fill(0).map(() => Math.random() - 0.5);
-                this.recurrentWeight = recurrent ? (Math.random() - 0.5) : 0.0;
+                this.weights = new Array(numInputs).fill(0).map(() => Math.random() - 0.5); // input weights
+                this.recurrentWeight = recurrent ? (Math.random() - 0.5) : 0.0;            // feedback/recurrent weight
                 this.bias = Math.random() - 0.5;
-                this.output = 0;
-                this.prevOutput = 0;
-                this.error = 0;
+                this.output = 0;      // Neuron output this timestep
+                this.prevOutput = 0;  // Output at previous timestep (for recurrence)
+                this.error = 0;       // Backpropagated error term
             }
-
+            // Save this neuron's learned parameters to JSON for download
             toJSON() {
                 return {
                     weights: this.weights,
@@ -78,7 +100,7 @@
                     bias: this.bias,
                 };
             }
-
+            // Rebuild a neuron from stored parameters for restore/load
             static fromJSON(json) {
                 const neuron = new TNeuron(json.weights.length, json.recurrentWeight !== 0);
                 neuron.weights = json.weights;
@@ -88,6 +110,7 @@
             }
         }
 
+        /** === RNN layer: holds an array of neurons === */
         class TLayer {
             constructor(numNeurons, numInputs, recurrent = false) {
                 this.neurons = [];
@@ -95,13 +118,11 @@
                     this.neurons.push(new TNeuron(numInputs, recurrent));
                 }
             }
-
             toJSON() {
                 return {
                     neurons: this.neurons.map(n => n.toJSON())
                 };
             }
-
             static fromJSON(json, numInputs, recurrent = false) {
                 const layer = new TLayer(json.neurons.length, numInputs, recurrent);
                 for (let i = 0; i < json.neurons.length; i++) {
@@ -111,20 +132,25 @@
             }
         }
 
+        /** === The main multi-layer RNN logic === */
         class TMultiLayerRNN {
             constructor(inputSize, hiddenSizes, outputSize, learningRate = 0.1) {
                 this.learningRate = learningRate;
+                // Build the input layer 
                 this.inputLayer = new TLayer(inputSize, inputSize, false);
+                // Build hidden layers, each recurrent (feedback)
                 this.hiddenLayers = [];
                 let prevSize = inputSize;
                 for (let i = 0; i < hiddenSizes.length; i++) {
                     this.hiddenLayers.push(new TLayer(hiddenSizes[i], prevSize, true));
                     prevSize = hiddenSizes[i];
                 }
+                // Build the output layer (not recurrent)
                 this.outputLayer = new TLayer(outputSize, prevSize, false);
                 this.maxIterations = 200;
             }
 
+            // Set all 'prevOutput' (hidden state) to zero for new sequence/epoch
             resetHiddenStates() {
                 for (let k = 0; k < this.hiddenLayers.length; k++) {
                     for (let n = 0; n < this.hiddenLayers[k].neurons.length; n++) {
@@ -133,6 +159,7 @@
                 }
             }
 
+            // Push current .output to .prevOutput for next timestep's recurrence
             stepHiddenState() {
                 for (let k = 0; k < this.hiddenLayers.length; k++) {
                     for (let n = 0; n < this.hiddenLayers[k].neurons.length; n++) {
@@ -141,10 +168,13 @@
                 }
             }
 
+            // Feed forward one step (one time step's input through layers)
             feedForwardStep(input) {
+                // Input layer: each input is its own "output"
                 for (let i = 0; i < this.inputLayer.neurons.length; i++) {
                     this.inputLayer.neurons[i].output = input[i];
                 }
+                // Each hidden layer: combine inputs (from previous layer) plus feedback from own previous output
                 for (let k = 0; k < this.hiddenLayers.length; k++) {
                     let prevOutputs = k === 0 ?
                         this.inputLayer.neurons.map(n => n.output)
@@ -153,12 +183,16 @@
                     for (let i = 0; i < this.hiddenLayers[k].neurons.length; i++) {
                         let neuron = this.hiddenLayers[k].neurons[i];
                         let sum = neuron.bias;
+                        // Input connections
                         for (let j = 0; j < prevOutputs.length; j++)
                             sum += prevOutputs[j] * neuron.weights[j];
+                        // Plus: feedback connection to self (recurrent connection)
                         sum += neuron.prevOutput * neuron.recurrentWeight;
+                        // Apply sigmoid activation (commonly used for RNNs)
                         neuron.output = 1.0 / (1 + Math.exp(-sum));
                     }
                 }
+                // Output layer: simple feedforward, no recurrence
                 let lastHidden = this.hiddenLayers[this.hiddenLayers.length - 1];
                 let prevOutputs = lastHidden.neurons.map(n => n.output);
                 for (let i = 0; i < this.outputLayer.neurons.length; i++) {
@@ -168,14 +202,18 @@
                         sum += prevOutputs[j] * neuron.weights[j];
                     neuron.output = 1.0 / (1 + Math.exp(-sum));
                 }
+                // After all outputs: step hidden states for next round
                 this.stepHiddenState();
             }
 
+            // Backpropagation: output error and send it back through all hidden layers
             backPropagate(target) {
+                // Output layer error using sigmoid gradient
                 for (let i = 0; i < this.outputLayer.neurons.length; i++) {
                     let neuron = this.outputLayer.neurons[i];
                     neuron.error = neuron.output * (1 - neuron.output) * (target[i] - neuron.output);
                 }
+                // Hidden layers: sum errors from higher layers, weighted by connection weights, with sigmoid derivative
                 for (let k = this.hiddenLayers.length - 1; k >= 0; k--) {
                     for (let i = 0; i < this.hiddenLayers[k].neurons.length; i++) {
                         let neuron = this.hiddenLayers[k].neurons[i];
@@ -192,15 +230,18 @@
                 }
             }
 
+            // Update weights for all layers after error computation
             updateWeights(input) {
                 let lastHidden = this.hiddenLayers[this.hiddenLayers.length - 1];
                 let prevOutputs = lastHidden.neurons.map(n => n.output);
+                // Output layer weight updates
                 for (let i = 0; i < this.outputLayer.neurons.length; i++) {
                     let neuron = this.outputLayer.neurons[i];
                     for (let j = 0; j < neuron.weights.length; j++)
                         neuron.weights[j] += this.learningRate * neuron.error * prevOutputs[j];
                     neuron.bias += this.learningRate * neuron.error;
                 }
+                // Hidden layers (including recurrent weights)
                 for (let k = this.hiddenLayers.length - 1; k >= 0; k--) {
                     let prev = k === 0 ? this.inputLayer.neurons.map(n => n.output)
                                        : this.hiddenLayers[k - 1].neurons.map(n => n.output);
@@ -209,13 +250,13 @@
                         let neuron = this.hiddenLayers[k].neurons[i];
                         for (let j = 0; j < neuron.weights.length; j++)
                             neuron.weights[j] += this.learningRate * neuron.error * prev[j];
-
                         neuron.recurrentWeight += this.learningRate * neuron.error * neuron.prevOutput;
                         neuron.bias += this.learningRate * neuron.error;
                     }
                 }
             }
 
+            // Predict for a full sequence: step through inputs and collect outputs for all time steps
             predictSequence(sequence) {
                 this.resetHiddenStates();
                 let results = [];
@@ -226,6 +267,7 @@
                 return results;
             }
 
+            // Train on a sequence of inputs/targets: one step per timestep
             trainSequence(inputs, targets) {
                 this.resetHiddenStates();
                 for (let t = 0; t < inputs.length; t++) {
@@ -235,6 +277,7 @@
                 }
             }
 
+            // Save network parameters to a readable JSON text file
             toJSON() {
                 return JSON.stringify({
                     learningRate: this.learningRate,
@@ -247,16 +290,15 @@
                     outputLayer: this.outputLayer.toJSON()
                 });
             }
-
+            // Restore network from saved JSON data
             static fromJSON(jsonStr) {
                 let obj = JSON.parse(jsonStr);
                 let net = new TMultiLayerRNN(obj.inputSize, obj.hiddenSizes, obj.outputSize, obj.learningRate);
-                // Hidden layers
+                // Rebuild hidden/output layers
                 for (let k = 0; k < obj.hiddenLayers.length; k++) {
                     let prevSize = k === 0 ? obj.inputSize : obj.hiddenSizes[k-1];
                     net.hiddenLayers[k] = TLayer.fromJSON(obj.hiddenLayers[k], prevSize, true);
                 }
-                // Output layer
                 let lastHiddenSize = obj.hiddenSizes[obj.hiddenSizes.length-1];
                 net.outputLayer = TLayer.fromJSON(obj.outputLayer, lastHiddenSize, false);
                 net.learningRate = obj.learningRate;
@@ -264,11 +306,12 @@
             }
         }
 
-        // Global data arrays for training (like MLP)
+        // ==== Global vars: neural net and training data arrays ====
         let rnn = null;
-        let inputs = [];   // [ [input_timestep], ... ]
-        let targets = [];  // [ [target_timestep], ... ]
+        let inputs = [];   // Each element is [input_timestep]
+        let targets = [];  // Each element is [target_timestep]
 
+        // === UI: build new network with user settings
         function createNetwork() {
             const inputSize = parseInt(document.getElementById("inputSize").value);
             const hiddenSizes = document.getElementById("hiddenSizes").value.split(",").map(s => parseInt(s.trim())).filter(n => !isNaN(n));
@@ -279,7 +322,7 @@
                 `Input=${inputSize}, Hidden=[${hiddenSizes.join(',')}], Output=${outputSize}, LR=${learningRate}`;
         }
 
-        // CSV Import (matches MLP style)
+        // Helper: parse csv text into inputs/targets arrays
         function parseCSV(text, inputSize, outputSize) {
             let lines = text.trim().split("\n");
             let seqInputs = [], seqTargets = [];
@@ -288,7 +331,7 @@
                 let arr = line.trim().split(",").map(Number);
                 let input = arr.slice(0, inputSize);
                 let target = arr.slice(inputSize, inputSize + outputSize);
-                // Fallback: if no targets, use input as target (identity)
+                // If not enough target values, pad with input or zeros
                 if (target.length < outputSize) {
                     for (let j = target.length; j < outputSize; j++)
                         target[j] = (input[j % input.length] || 0.0);
@@ -299,6 +342,7 @@
             return {inputs: seqInputs, targets: seqTargets};
         }
 
+        // === Load training data from CSV file
         function loadCSV() {
             const file = document.getElementById('csvFile').files[0];
             if (!file) {
@@ -316,6 +360,7 @@
             reader.readAsText(file);
         }
 
+        // === Load training data from pasted textarea
         function loadCSVText() {
             const text = document.getElementById('csvPaste').value;
             if (!text || text.trim() === "") {
@@ -329,7 +374,7 @@
             document.getElementById('dataStatus').textContent = "Loaded " + inputs.length + " timesteps from pasted CSV.";
         }
 
-        // Saving/loading network (like the MLP demo)
+        // === Save/restore neural network weight files as JSON (for disk/download)
         function saveNetwork() {
             if (!rnn) return alert("Create an RNN first.");
             const blob = new Blob([rnn.toJSON()], {type: "application/json"});
@@ -339,7 +384,6 @@
             a.click();
             document.getElementById('modelStatus').textContent = "Network saved.";
         }
-
         function loadNetwork() {
             document.getElementById('modelFile').onchange = function(evt) {
                 const file = evt.target.files[0];
@@ -354,6 +398,7 @@
             document.getElementById('modelFile').click();
         }
 
+        // === Train for n epochs, then show prediction vs target table
         function trainNetwork() {
             if (!rnn) return alert("Create an RNN first.");
             if (!inputs.length || !targets.length)
@@ -362,7 +407,7 @@
             for (let epoch = 1; epoch <= epochs; epoch++) {
                 rnn.trainSequence(inputs, targets);
             }
-            // Report
+            // After all epochs: show predictions vs real (for each timestep)
             let preds = rnn.predictSequence(inputs);
             let out = "<pre>";
             out += "t | Inputs | Predictions | Targets\n";
@@ -379,13 +424,15 @@
             document.getElementById("trainStatus").innerHTML = out;
         }
 
+        // Parse and validate user string as a sequence for prediction
         function parseSequenceInput(str) {
-            // Accept "a,b;c,d;..." or one row per line
+            // Supports either newline or ; for each time step row
             return str.trim().split(/[\n;]/).map(line =>
                 line.trim().split(",").map(v => parseFloat(v.trim())).filter(x => !isNaN(x))
             ).filter(arr => arr.length > 0);
         }
 
+        // Run prediction for user-input sequence and print stepwise predictions
         function predictSequence() {
             if (!rnn) {
                 document.getElementById("predictOutput").textContent = "Create RNN first!";
