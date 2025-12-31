@@ -1,13 +1,7 @@
 <!--
-  Advanced Multi-Layer RNN Trainer
-  Features:
-    - Full Backpropagation Through Time (BPTT)
-    - Gradient clipping
-    - LSTM/GRU/Simple RNN cell types
-    - Loss tracking per epoch with train/validation split
-    - Configurable activations (sigmoid, tanh, relu) and loss functions (MSE, cross-entropy)
-    - Batch processing
-    - Save/load model state as .json files
+Matthew Abbott 2025
+
+RNN
 -->
 
 <!DOCTYPE html>
@@ -313,8 +307,10 @@
         }
 
         static fromJSON(json) {
-            const cell = new SimpleRNNCell(json.inputSize, json.hiddenSize, json.activation);
-            cell.Wih = json.Wih; cell.Whh = json.Whh; cell.bh = json.bh;
+            const cell = new SimpleRNNCell(json.inputSize || 1, json.hiddenSize || 1, json.activation || 'tanh');
+            if (json.Wih) cell.Wih = json.Wih;
+            if (json.Whh) cell.Whh = json.Whh;
+            if (json.bh) cell.bh = json.bh;
             return cell;
         }
     }
@@ -469,11 +465,18 @@
         }
 
         static fromJSON(json) {
-            const cell = new LSTMCell(json.inputSize, json.hiddenSize, json.activation);
-            cell.Wf = json.Wf; cell.Wi = json.Wi; cell.Wc = json.Wc; cell.Wo = json.Wo;
-            cell.bf = json.bf; cell.bi = json.bi; cell.bc = json.bc; cell.bo = json.bo;
-            return cell;
-        }
+             // Create instance with dummy values, then override with loaded weights
+             const cell = new LSTMCell(json.inputSize || 1, json.hiddenSize || 1, json.activation || 'tanh');
+             if (json.Wf) cell.Wf = json.Wf;
+             if (json.Wi) cell.Wi = json.Wi;
+             if (json.Wc) cell.Wc = json.Wc;
+             if (json.Wo) cell.Wo = json.Wo;
+             if (json.Bf) cell.bf = json.Bf;
+             if (json.Bi) cell.bi = json.Bi;
+             if (json.Bc) cell.bc = json.Bc;
+             if (json.Bo) cell.bo = json.Bo;
+             return cell;
+         }
     }
 
     // ========== GRU Cell ==========
@@ -626,9 +629,13 @@
         }
 
         static fromJSON(json) {
-            const cell = new GRUCell(json.inputSize, json.hiddenSize, json.activation);
-            cell.Wz = json.Wz; cell.Wr = json.Wr; cell.Wh = json.Wh;
-            cell.bz = json.bz; cell.br = json.br; cell.bh = json.bh;
+            const cell = new GRUCell(json.inputSize || 1, json.hiddenSize || 1, json.activation || 'tanh');
+            if (json.Wz) cell.Wz = json.Wz;
+            if (json.Wr) cell.Wr = json.Wr;
+            if (json.Wh) cell.Wh = json.Wh;
+            if (json.Bz) cell.bz = json.Bz;
+            if (json.Br) cell.br = json.Br;
+            if (json.Bh) cell.bh = json.Bh;
             return cell;
         }
     }
@@ -711,8 +718,9 @@
         }
 
         static fromJSON(json) {
-            const layer = new OutputLayer(json.inputSize, json.outputSize, json.activation);
-            layer.W = json.W; layer.b = json.b;
+            const layer = new OutputLayer(json.inputSize || 1, json.outputSize || 1, json.activation || 'linear');
+            if (json.W) layer.W = json.W;
+            if (json.B) layer.b = json.B;
             return layer;
         }
     }
@@ -927,15 +935,35 @@
 
         static fromJSON(jsonStr) {
             const obj = JSON.parse(jsonStr);
-            const rnn = new AdvancedRNN(obj);
             
-            for (let i = 0; i < obj.cells.length; i++) {
-                const cellData = obj.cells[i];
-                if (cellData.type === 'lstm') rnn.cells[i] = LSTMCell.fromJSON(cellData);
-                else if (cellData.type === 'gru') rnn.cells[i] = GRUCell.fromJSON(cellData);
-                else rnn.cells[i] = SimpleRNNCell.fromJSON(cellData);
+            // Convert snake_case from Pascal to camelCase for constructor
+            const config = {
+                inputSize: obj.input_size,
+                outputSize: obj.output_size,
+                hiddenSizes: obj.hidden_sizes,
+                cellType: obj.cell_type,
+                activation: obj.activation,
+                outputActivation: obj.output_activation,
+                lossFunction: obj.loss_type === 'mse' ? 'mse' : 'crossentropy',
+                learningRate: obj.learning_rate,
+                gradientClip: obj.gradient_clip,
+                bpttSteps: obj.bptt_steps
+            };
+            
+            const rnn = new AdvancedRNN(config);
+            
+            // Load weights if present
+            if (obj.cells && obj.cells.length > 0) {
+                for (let i = 0; i < obj.cells.length; i++) {
+                    const cellData = obj.cells[i];
+                    if (obj.cell_type === 'lstm') rnn.cells[i] = LSTMCell.fromJSON(cellData);
+                    else if (obj.cell_type === 'gru') rnn.cells[i] = GRUCell.fromJSON(cellData);
+                    else rnn.cells[i] = SimpleRNNCell.fromJSON(cellData);
+                }
             }
-            rnn.outputLayer = OutputLayer.fromJSON(obj.outputLayer);
+            if (obj.output_layer) {
+                rnn.outputLayer = OutputLayer.fromJSON(obj.output_layer);
+            }
             return rnn;
         }
     }
@@ -1059,12 +1087,23 @@
             if (!file) return;
             const reader = new FileReader();
             reader.onload = function(e) {
-                rnn = AdvancedRNN.fromJSON(e.target.result);
-                document.getElementById('modelStatus').textContent = "Network loaded!";
-                document.getElementById("cellType").value = rnn.cellType;
-                document.getElementById("activation").value = rnn.activation;
-                document.getElementById("outputActivation").value = rnn.outputActivation;
-                document.getElementById("lossFunction").value = rnn.lossFunction;
+                try {
+                    rnn = AdvancedRNN.fromJSON(e.target.result);
+                    if (!rnn) {
+                        document.getElementById('modelStatus').textContent = "Error: Failed to parse model";
+                        console.error("fromJSON returned null");
+                        return;
+                    }
+                    document.getElementById('modelStatus').textContent = "Network loaded!";
+                    document.getElementById("cellType").value = rnn.cellType;
+                    document.getElementById("activation").value = rnn.activation;
+                    document.getElementById("outputActivation").value = rnn.outputActivation;
+                    document.getElementById("lossFunction").value = rnn.lossFunction;
+                    console.log("Model loaded successfully", rnn);
+                } catch (err) {
+                    document.getElementById('modelStatus').textContent = "Error: " + err.message;
+                    console.error("Load error:", err);
+                }
             };
             reader.readAsText(file);
         };
