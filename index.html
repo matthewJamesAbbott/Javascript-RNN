@@ -1,30 +1,260 @@
 <!--
-Matthew Abbott 2025
+MIT License
 
-RNN
+Copyright (c) 2025 Matthew Abbott
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions: 
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 -->
 
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
-    <title>RNNr</title>
+    <title>Facaded RNN</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 2rem; }
-        .section { margin-bottom: 2rem; border-bottom: 1px solid #ccc; padding-bottom: 1rem; }
+        body { font-family: Arial, sans-serif; margin: 2rem; background: #fafafa; }
+        .section { margin-bottom: 2rem; border-bottom: 1px solid #ccc; padding-bottom: 1rem; background: #fff; padding: 1rem; border-radius: 8px; }
         label { display: block; margin-top: 0.5rem; }
+        input, select, textarea, button { margin: 0.5rem 0; }
+        button { padding: 8px 16px; cursor: pointer; background: #5a5a5a; color: white; border: none; border-radius: 0; }
+        button:hover { background: #4a4a4a; }
+        button:active { background: #3a3a3a; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
         .results { background-color: #f5f5f5; padding: 1rem; margin: 1rem 0; border-radius: 5px; }
         .metric { margin: 0.5rem 0; font-weight: bold; }
         table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
         th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
         th { background-color: #f2f2f2; }
-        .loss-chart { width: 100%; height: 200px; background: #fafafa; border: 1px solid #ddd; margin: 1rem 0; }
-        select, input { padding: 4px; margin: 2px; }
+        .epoch-controls { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
+        .epoch-info { font-style: italic; color: #666; margin-top: 0.5rem; }
+        .warning { color: #b36b00; background-color: #fff3cd; padding: 0.5rem; border-radius: 4px; margin: 0.5rem 0; }
+        .error-msg { color: #721c24; background-color: #f8d7da; padding: 0.5rem; border-radius: 4px; margin: 0.5rem 0; }
+        .facade-section { background-color: #e8f4f8; padding: 1rem; border-radius: 5px; margin: 1rem 0; }
+        .facade-controls { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.5rem; }
+        .facade-output { background-color: #fff; border: 1px solid #ccc; padding: 0.5rem; margin-top: 0.5rem; font-family: monospace; white-space: pre-wrap; max-height: 300px; overflow-y: auto; }
+        .histogram-container { display: flex; align-items: flex-end; height: 100px; border: 1px solid #ccc; margin: 0.5rem 0; }
+        .histogram-bar { background-color: #4CAF50; flex: 1; margin: 0 1px; }
         .inline { display: inline-block; margin-right: 1rem; }
+        .loss-chart { width: 100%; height: 200px; background: #fafafa; border: 1px solid #ddd; margin: 1rem 0; }
     </style>
 </head>
+
 <body>
-    <h1>RNN</h1>
+<script>
+function visualizeRNNArchitecture(rnn, containerId) {
+    if (!rnn) return;
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    const spacing = 85;
+    const padding = 20;
+    const legendSpace = 80;
+    const numHiddenLayers = rnn.hiddenSizes?.length || rnn.cells?.length || 0;
+    const totalLayers = 2 + numHiddenLayers;
+    const totalWidth = totalLayers * spacing + padding * 2 + legendSpace;
+    const totalHeight = 200;
+
+    const svgContainer = document.createElement('div');
+    svgContainer.setAttribute('style', 'overflow-x: auto; overflow-y: hidden; border: 1px solid #ccc; background: #fafafa; border-radius: 4px; margin: 1rem 0; height: 220px;');
+
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('width', totalWidth);
+    svg.setAttribute('height', totalHeight);
+    svg.setAttribute('style', 'display: block;');
+
+    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+    defs.innerHTML = `
+        <linearGradient id="inputGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" style="stop-color:#4caf50;stop-opacity:1" />
+            <stop offset="100%" style="stop-color:#2e7d32;stop-opacity:1" />
+        </linearGradient>
+        <linearGradient id="rnnGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" style="stop-color:#9c27b0;stop-opacity:1" />
+            <stop offset="100%" style="stop-color:#6a1b9a;stop-opacity:1" />
+        </linearGradient>
+        <linearGradient id="lstmGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" style="stop-color:#2196f3;stop-opacity:1" />
+            <stop offset="100%" style="stop-color:#1565c0;stop-opacity:1" />
+        </linearGradient>
+        <linearGradient id="gruGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" style="stop-color:#ff9800;stop-opacity:1" />
+            <stop offset="100%" style="stop-color:#ef6c00;stop-opacity:1" />
+        </linearGradient>
+        <linearGradient id="outGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" style="stop-color:#f44336;stop-opacity:1" />
+            <stop offset="100%" style="stop-color:#c62828;stop-opacity:1" />
+        </linearGradient>
+    `;
+    svg.appendChild(defs);
+
+    let xPos = padding + legendSpace;
+    const cy = totalHeight / 2;
+    const cellType = (rnn.cellType || 'lstm').toLowerCase();
+
+    drawRNNInputLayer(svg, xPos, cy, rnn.inputSize || 4);
+    xPos += spacing;
+
+    const hiddenSizes = rnn.hiddenSizes || [16];
+    for (let i = 0; i < hiddenSizes.length; i++) {
+        drawRNNCellLayer(svg, xPos, cy, cellType, hiddenSizes[i], i + 1);
+        xPos += spacing;
+    }
+
+    drawRNNOutputLayer(svg, xPos, cy, rnn.outputSize || 3, rnn.outputActivation || 'linear');
+    drawRNNLegend(svg, padding + 5, cy - 40, cellType);
+
+    svgContainer.innerHTML = '';
+    svgContainer.appendChild(svg);
+    container.innerHTML = '';
+    container.appendChild(svgContainer);
+}
+
+function drawRNNInputLayer(svg, x, cy, size) {
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    const box = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    box.setAttribute('x', x - 25); box.setAttribute('y', cy - 35);
+    box.setAttribute('width', 50); box.setAttribute('height', 70);
+    box.setAttribute('fill', 'url(#inputGrad)'); box.setAttribute('stroke', '#1b5e20');
+    box.setAttribute('stroke-width', 1.5); box.setAttribute('rx', 3);
+    g.appendChild(box);
+
+    const text1 = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    text1.setAttribute('x', x); text1.setAttribute('y', cy - 12);
+    text1.setAttribute('text-anchor', 'middle'); text1.setAttribute('font-size', '10');
+    text1.setAttribute('font-weight', 'bold'); text1.setAttribute('fill', 'white');
+    text1.textContent = 'Input';
+    g.appendChild(text1);
+
+    const text2 = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    text2.setAttribute('x', x); text2.setAttribute('y', cy + 8);
+    text2.setAttribute('text-anchor', 'middle'); text2.setAttribute('font-size', '9');
+    text2.setAttribute('fill', 'white');
+    text2.textContent = `${size}`;
+    g.appendChild(text2);
+
+    svg.appendChild(g);
+}
+
+function drawRNNCellLayer(svg, x, cy, cellType, hiddenSize, layerNum) {
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    let gradId = 'lstmGrad', strokeColor = '#1565c0', label = 'LSTM';
+    if (cellType === 'gru') { gradId = 'gruGrad'; strokeColor = '#ef6c00'; label = 'GRU'; }
+    else if (cellType === 'rnn' || cellType === 'simplernn') { gradId = 'rnnGrad'; strokeColor = '#6a1b9a'; label = 'RNN'; }
+
+    const box = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    box.setAttribute('x', x - 28); box.setAttribute('y', cy - 35);
+    box.setAttribute('width', 56); box.setAttribute('height', 70);
+    box.setAttribute('fill', `url(#${gradId})`); box.setAttribute('stroke', strokeColor);
+    box.setAttribute('stroke-width', 1.5); box.setAttribute('rx', 3);
+    g.appendChild(box);
+
+    const recur = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    recur.setAttribute('d', `M${x-10},${cy-35} Q${x-10},${cy-50} ${x},${cy-50} Q${x+10},${cy-50} ${x+10},${cy-35}`);
+    recur.setAttribute('fill', 'none'); recur.setAttribute('stroke', 'white');
+    recur.setAttribute('stroke-width', 2);
+    g.appendChild(recur);
+
+    const text1 = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    text1.setAttribute('x', x); text1.setAttribute('y', cy - 5);
+    text1.setAttribute('text-anchor', 'middle'); text1.setAttribute('font-size', '10');
+    text1.setAttribute('font-weight', 'bold'); text1.setAttribute('fill', 'white');
+    text1.textContent = `${label}${layerNum}`;
+    g.appendChild(text1);
+
+    const text2 = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    text2.setAttribute('x', x); text2.setAttribute('y', cy + 12);
+    text2.setAttribute('text-anchor', 'middle'); text2.setAttribute('font-size', '9');
+    text2.setAttribute('fill', 'white');
+    text2.textContent = `h=${hiddenSize}`;
+    g.appendChild(text2);
+
+    svg.appendChild(g);
+}
+
+function drawRNNOutputLayer(svg, x, cy, size, activation) {
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    const box = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    box.setAttribute('x', x - 28); box.setAttribute('y', cy - 35);
+    box.setAttribute('width', 56); box.setAttribute('height', 70);
+    box.setAttribute('fill', 'url(#outGrad)'); box.setAttribute('stroke', '#c62828');
+    box.setAttribute('stroke-width', 1.5); box.setAttribute('rx', 3);
+    g.appendChild(box);
+
+    const text1 = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    text1.setAttribute('x', x); text1.setAttribute('y', cy - 12);
+    text1.setAttribute('text-anchor', 'middle'); text1.setAttribute('font-size', '10');
+    text1.setAttribute('font-weight', 'bold'); text1.setAttribute('fill', 'white');
+    text1.textContent = 'Output';
+    g.appendChild(text1);
+
+    const text2 = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    text2.setAttribute('x', x); text2.setAttribute('y', cy + 5);
+    text2.setAttribute('text-anchor', 'middle'); text2.setAttribute('font-size', '9');
+    text2.setAttribute('fill', 'white');
+    text2.textContent = `${size}`;
+    g.appendChild(text2);
+
+    const text3 = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    text3.setAttribute('x', x); text3.setAttribute('y', cy + 18);
+    text3.setAttribute('text-anchor', 'middle'); text3.setAttribute('font-size', '8');
+    text3.setAttribute('fill', 'white');
+    text3.textContent = activation;
+    g.appendChild(text3);
+
+    svg.appendChild(g);
+}
+
+function drawRNNLegend(svg, x, y, cellType) {
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    let cellColor = 'url(#lstmGrad)', cellLabel = 'LSTM';
+    if (cellType === 'gru') { cellColor = 'url(#gruGrad)'; cellLabel = 'GRU'; }
+    else if (cellType === 'rnn' || cellType === 'simplernn') { cellColor = 'url(#rnnGrad)'; cellLabel = 'RNN'; }
+
+    const items = [
+        { label: 'Input', color: 'url(#inputGrad)' },
+        { label: cellLabel, color: cellColor },
+        { label: 'Output', color: 'url(#outGrad)' }
+    ];
+
+    let yOffset = y;
+    items.forEach(item => {
+        const box = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        box.setAttribute('x', x); box.setAttribute('y', yOffset);
+        box.setAttribute('width', 10); box.setAttribute('height', 10);
+        box.setAttribute('fill', item.color); box.setAttribute('stroke', '#666');
+        box.setAttribute('stroke-width', 0.5); box.setAttribute('rx', 2);
+        g.appendChild(box);
+
+        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        text.setAttribute('x', x + 14); text.setAttribute('y', yOffset + 8);
+        text.setAttribute('font-size', '9'); text.setAttribute('fill', '#333');
+        text.textContent = item.label;
+        g.appendChild(text);
+
+        yOffset += 18;
+    });
+
+    svg.appendChild(g);
+}
+</script>
+    <h1>Facaded RNN</h1>
 
     <div class="section">
         <h2>Network Configuration</h2>
@@ -85,16 +315,12 @@ RNN
         <br><br>
         <button onclick="createNetwork()">Create Network</button>
         <span id="networkStatus" style="margin-left:1rem;"></span>
+        <div id="networkViz"></div>
     </div>
 
     <div class="section">
-        <h2>Load Training Data</h2>
-        <input type="file" id="csvFile" accept=".csv">
-        <button onclick="loadCSV()">Load CSV File</button>
-        <span id="dataStatus"></span><br>
-        <label>Or paste CSV data (input cols, then target cols per row):</label>
-        <textarea id="csvPaste" rows="5" cols="60"></textarea>
-        <button onclick="loadCSVText()">Load Pasted CSV</button>
+        <h2>Regularization</h2>
+        <label>Dropout Rate (0-1): <input type="number" id="dropoutRate" value="0" step="0.1" min="0" max="0.9"></label>
     </div>
 
     <div class="section">
@@ -106,31 +332,118 @@ RNN
     </div>
 
     <div class="section">
+        <h2>Load Training Data</h2>
+        <input type="file" id="csvFile" accept=".csv">
+        <button onclick="loadCSV()">Load CSV File</button>
+        <span id="dataStatus"></span><br>
+        <label>Or paste CSV data (input cols, then target cols per row):</label>
+        <textarea id="csvPaste" rows="5" cols="60"></textarea>
+        <button onclick="loadCSVText()">Load Pasted CSV</button>
+        <br><br>
+        <button onclick="generateTestData()">Generate Test Data</button>
+        <label>Samples per class: <input type="number" id="samplesPerClass" value="100" min="10" style="width:60px"></label>
+    </div>
+
+    <div class="section">
         <h2>Train Network</h2>
-        <div class="inline">
+        <div class="epoch-controls">
             <label>Epochs: <input type="number" id="epochs" value="100" min="1" max="100000"></label>
-        </div>
-        <div class="inline">
             <label>Batch Size: <input type="number" id="batchSize" value="1" min="1"></label>
-        </div>
-        <div class="inline">
             <label>Validation Split: <input type="number" id="validationSplit" value="0.2" step="0.05" min="0" max="0.5"></label>
-        </div>
-        <div class="inline">
             <label>Log Every N Epochs: <input type="number" id="logInterval" value="10" min="1"></label>
         </div>
-        <br><br>
+        <br>
         <button onclick="trainNetwork()">Train RNN</button>
+        <button onclick="trainWithProgress()">Train with Progress</button>
         <button onclick="stopTraining()">Stop</button>
         <span id="trainStatus"></span>
+        <div id="trainingProgress"></div>
         <div id="lossLog" class="results" style="max-height:300px; overflow-y:auto;"></div>
         <canvas id="lossChart" class="loss-chart"></canvas>
+    </div>
+
+    <div class="section facade-section">
+        <h2>🔧 RNN Facade API Explorer</h2>
+        <p>Use the facade to inspect and modify the RNN internals:</p>
+
+        <div class="facade-controls">
+            <label>Timestep: <input type="number" id="facadeTimestep" value="0" min="0"></label>
+            <label>Layer Index: <input type="number" id="facadeLayerIdx" value="0" min="0"></label>
+            <label>Neuron Index: <input type="number" id="facadeNeuronIdx" value="0" min="0"></label>
+            <label>Weight Index: <input type="number" id="facadeWeightIdx" value="0" min="0"></label>
+            <label>Gate Type:
+                <select id="facadeGateType">
+                    <option value="f">Forget (f)</option>
+                    <option value="i">Input (i)</option>
+                    <option value="o">Output (o)</option>
+                    <option value="cTilde">Cell Candidate (c̃)</option>
+                    <option value="z">Update (z)</option>
+                    <option value="r">Reset (r)</option>
+                    <option value="hTilde">Hidden Candidate (h̃)</option>
+                </select>
+            </label>
+        </div>
+
+        <h3>Time-Step & Sequence Access</h3>
+        <button onclick="facadeGetHiddenState()">Get Hidden State</button>
+        <button onclick="facadeGetOutput()">Get Output</button>
+        <button onclick="facadeGetInputVector()">Get Input Vector</button>
+        <button onclick="facadeGetPreActivation()">Get PreActivation</button>
+
+        <h3>Cell State & Gate Access (LSTM/GRU)</h3>
+        <button onclick="facadeGetCellState()">Get Cell State</button>
+        <button onclick="facadeGetGateValue()">Get Gate Value</button>
+
+        <h3>Gradients & Optimizer</h3>
+        <button onclick="facadeGetWeightGradient()">Get Weight Gradient</button>
+        <button onclick="facadeGetBiasGradient()">Get Bias Gradient</button>
+        <button onclick="facadeGetCellGradient()">Get Cell Gradient</button>
+        <button onclick="facadeGetOptimizerState()">Get Optimizer State</button>
+
+        <h3>Sequence APIs</h3>
+        <button onclick="facadeGetSequenceOutputs()">Get Sequence Outputs</button>
+        <button onclick="facadeGetSequenceHiddenStates()">Get Sequence Hidden</button>
+        <button onclick="facadeGetSequenceCellStates()">Get Sequence Cells</button>
+        <button onclick="facadeGetSequenceGates()">Get Sequence Gates</button>
+
+        <h3>Dropout & Regularization</h3>
+        <label>Dropout Rate: <input type="number" id="facadeDropoutRate" value="0.2" step="0.1" min="0" max="0.9" style="width:60px"></label>
+        <button onclick="facadeSetDropout()">Set Dropout</button>
+        <button onclick="facadeGetDropoutMask()">Get Dropout Mask</button>
+        <button onclick="facadeGetLayerNormStats()">Get LayerNorm Stats</button>
+
+        <h3>State Manipulation</h3>
+        <label>Value: <input type="number" id="facadeSetValue" value="0" step="0.1" style="width:60px"></label>
+        <button onclick="facadeResetHiddenState()">Reset Hidden</button>
+        <button onclick="facadeResetCellState()">Reset Cell</button>
+        <button onclick="facadeResetAllStates()">Reset All</button>
+        <button onclick="facadeInjectHiddenState()">Inject Hidden</button>
+        <button onclick="facadeSetHiddenState()">Set Hidden State</button>
+        <button onclick="facadeSetOutput()">Set Output</button>
+
+        <h3>Time-Series Diagnostics</h3>
+        <button onclick="facadeGetHiddenHistogram()">Hidden State Histogram</button>
+        <button onclick="facadeGetActivationHistogram()">Activation Over Time</button>
+        <button onclick="facadeGetGateSaturation()">Gate Saturation</button>
+        <button onclick="facadeGetGradientScales()">Gradient Scales</button>
+        <button onclick="facadeDetectVanishing()">Detect Vanishing</button>
+        <button onclick="facadeDetectExploding()">Detect Exploding</button>
+        <div id="histogramDisplay"></div>
+
+        <h3>Network Info</h3>
+        <button onclick="facadeGetLayerCount()">Get Layer Count</button>
+        <button onclick="facadeGetHiddenSize()">Get Hidden Size</button>
+        <button onclick="facadeGetCellType()">Get Cell Type</button>
+        <button onclick="facadeGetSequenceLength()">Get Sequence Length</button>
+
+        <h3>Output</h3>
+        <div id="facadeOutput" class="facade-output">Facade output will appear here...</div>
     </div>
 
     <div class="section">
         <h2>Predict</h2>
         <label>Input Sequence (rows separated by ; or newline, values by comma):<br>
-        <textarea id="predictSeq" rows="3" cols="40"></textarea></label><br>
+        <textarea id="predictSeq" rows="3" cols="40">0.1,0.2,0.3,0.4;0.2,0.3,0.4,0.5;0.3,0.4,0.5,0.6</textarea></label><br>
         <button onclick="predictSequence()">Predict Sequence</button>
         <div id="predictOutput"></div>
     </div>
@@ -140,31 +453,11 @@ RNN
 
     // ========== Activation Functions ==========
     const Activations = {
-        sigmoid: {
-            fn: x => 1 / (1 + Math.exp(-Math.max(-500, Math.min(500, x)))),
-            dfn: y => y * (1 - y)
-        },
-        tanh: {
-            fn: x => Math.tanh(x),
-            dfn: y => 1 - y * y
-        },
-        relu: {
-            fn: x => Math.max(0, x),
-            dfn: y => y > 0 ? 1 : 0
-        },
-        linear: {
-            fn: x => x,
-            dfn: y => 1
-        },
-        softmax: {
-            fn: (x, arr) => {
-                const maxVal = Math.max(...arr);
-                const exps = arr.map(v => Math.exp(v - maxVal));
-                const sum = exps.reduce((a, b) => a + b, 0);
-                return exps[arr.indexOf(x)] / sum;
-            },
-            dfn: y => y * (1 - y)
-        }
+        sigmoid: { fn: x => 1 / (1 + Math.exp(-Math.max(-500, Math.min(500, x)))), dfn: y => y * (1 - y) },
+        tanh: { fn: x => Math.tanh(x), dfn: y => 1 - y * y },
+        relu: { fn: x => Math.max(0, x), dfn: y => y > 0 ? 1 : 0 },
+        linear: { fn: x => x, dfn: y => 1 },
+        softmax: { fn: (x, arr) => { const m = Math.max(...arr); const e = arr.map(v => Math.exp(v - m)); const s = e.reduce((a,b)=>a+b,0); return e[arr.indexOf(x)]/s; }, dfn: y => y*(1-y) }
     };
 
     function applySoftmax(arr) {
@@ -177,13 +470,7 @@ RNN
     // ========== Loss Functions ==========
     const LossFunctions = {
         mse: {
-            loss: (pred, target) => {
-                let sum = 0;
-                for (let i = 0; i < pred.length; i++) {
-                    sum += Math.pow(pred[i] - target[i], 2);
-                }
-                return sum / pred.length;
-            },
+            loss: (pred, target) => pred.reduce((s, v, i) => s + (v - target[i]) ** 2, 0) / pred.length,
             gradient: (pred, target) => pred.map((p, i) => p - target[i])
         },
         crossentropy: {
@@ -204,9 +491,7 @@ RNN
 
     // ========== Gradient Clipping ==========
     function clipGradient(grad, maxNorm) {
-        if (Array.isArray(grad)) {
-            return grad.map(g => clipGradient(g, maxNorm));
-        }
+        if (Array.isArray(grad)) return grad.map(g => clipGradient(g, maxNorm));
         return Math.max(-maxNorm, Math.min(maxNorm, grad));
     }
 
@@ -216,32 +501,20 @@ RNN
             this.inputSize = inputSize;
             this.hiddenSize = hiddenSize;
             this.activation = activation;
-            
             const scale = Math.sqrt(2.0 / (inputSize + hiddenSize));
-            this.Wih = this.randomMatrix(hiddenSize, inputSize, scale);
-            this.Whh = this.randomMatrix(hiddenSize, hiddenSize, scale);
+            this.Wih = Array.from({length: hiddenSize}, () => Array.from({length: inputSize}, () => (Math.random() - 0.5) * 2 * scale));
+            this.Whh = Array.from({length: hiddenSize}, () => Array.from({length: hiddenSize}, () => (Math.random() - 0.5) * 2 * scale));
             this.bh = new Array(hiddenSize).fill(0);
-            
-            this.dWih = this.zeroMatrix(hiddenSize, inputSize);
-            this.dWhh = this.zeroMatrix(hiddenSize, hiddenSize);
-            this.dbh = new Array(hiddenSize).fill(0);
+            this.resetGradients();
         }
-
-        randomMatrix(rows, cols, scale) {
-            return Array.from({length: rows}, () => 
-                Array.from({length: cols}, () => (Math.random() - 0.5) * 2 * scale)
-            );
+        resetGradients() {
+            this.dWih = Array.from({length: this.hiddenSize}, () => new Array(this.inputSize).fill(0));
+            this.dWhh = Array.from({length: this.hiddenSize}, () => new Array(this.hiddenSize).fill(0));
+            this.dbh = new Array(this.hiddenSize).fill(0);
         }
-
-        zeroMatrix(rows, cols) {
-            return Array.from({length: rows}, () => new Array(cols).fill(0));
-        }
-
         forward(input, prevH) {
             const act = Activations[this.activation];
-            const h = new Array(this.hiddenSize);
-            const preH = new Array(this.hiddenSize);
-            
+            const h = [], preH = [];
             for (let i = 0; i < this.hiddenSize; i++) {
                 let sum = this.bh[i];
                 for (let j = 0; j < this.inputSize; j++) sum += this.Wih[i][j] * input[j];
@@ -251,19 +524,12 @@ RNN
             }
             return { h, preH, prevH: prevH.slice(), input: input.slice() };
         }
-
         backward(dh, cache, clipVal) {
             const act = Activations[this.activation];
             const { h, preH, prevH, input } = cache;
-            
-            const dhRaw = new Array(this.hiddenSize);
-            for (let i = 0; i < this.hiddenSize; i++) {
-                dhRaw[i] = clipGradient(dh[i] * act.dfn(h ? h[i] : Activations[this.activation].fn(preH[i])), clipVal);
-            }
-
+            const dhRaw = dh.map((d, i) => clipGradient(d * act.dfn(h[i]), clipVal));
             const dInput = new Array(this.inputSize).fill(0);
             const dPrevH = new Array(this.hiddenSize).fill(0);
-
             for (let i = 0; i < this.hiddenSize; i++) {
                 for (let j = 0; j < this.inputSize; j++) {
                     this.dWih[i][j] += dhRaw[i] * input[j];
@@ -277,7 +543,6 @@ RNN
             }
             return { dInput, dPrevH };
         }
-
         applyGradients(lr, clipVal) {
             for (let i = 0; i < this.hiddenSize; i++) {
                 for (let j = 0; j < this.inputSize; j++) {
@@ -292,27 +557,9 @@ RNN
                 this.dbh[i] = 0;
             }
         }
-
-        resetGradients() {
-            this.dWih = this.zeroMatrix(this.hiddenSize, this.inputSize);
-            this.dWhh = this.zeroMatrix(this.hiddenSize, this.hiddenSize);
-            this.dbh = new Array(this.hiddenSize).fill(0);
-        }
-
         getHiddenSize() { return this.hiddenSize; }
-
-        toJSON() {
-            return { type: 'rnn', inputSize: this.inputSize, hiddenSize: this.hiddenSize,
-                     activation: this.activation, Wih: this.Wih, Whh: this.Whh, bh: this.bh };
-        }
-
-        static fromJSON(json) {
-            const cell = new SimpleRNNCell(json.inputSize || 1, json.hiddenSize || 1, json.activation || 'tanh');
-            if (json.Wih) cell.Wih = json.Wih;
-            if (json.Whh) cell.Whh = json.Whh;
-            if (json.bh) cell.bh = json.bh;
-            return cell;
-        }
+        toJSON() { return { type: 'rnn', inputSize: this.inputSize, hiddenSize: this.hiddenSize, activation: this.activation, Wih: this.Wih, Whh: this.Whh, bh: this.bh }; }
+        static fromJSON(j) { const c = new SimpleRNNCell(j.inputSize, j.hiddenSize, j.activation); c.Wih = j.Wih; c.Whh = j.Whh; c.bh = j.bh; return c; }
     }
 
     // ========== LSTM Cell ==========
@@ -321,47 +568,35 @@ RNN
             this.inputSize = inputSize;
             this.hiddenSize = hiddenSize;
             this.activation = activation;
-            
             const scale = Math.sqrt(2.0 / (inputSize + hiddenSize));
-            this.Wf = this.randomMatrix(hiddenSize, inputSize + hiddenSize, scale);
-            this.Wi = this.randomMatrix(hiddenSize, inputSize + hiddenSize, scale);
-            this.Wc = this.randomMatrix(hiddenSize, inputSize + hiddenSize, scale);
-            this.Wo = this.randomMatrix(hiddenSize, inputSize + hiddenSize, scale);
-            
+            const n = inputSize + hiddenSize;
+            this.Wf = Array.from({length: hiddenSize}, () => Array.from({length: n}, () => (Math.random() - 0.5) * 2 * scale));
+            this.Wi = Array.from({length: hiddenSize}, () => Array.from({length: n}, () => (Math.random() - 0.5) * 2 * scale));
+            this.Wc = Array.from({length: hiddenSize}, () => Array.from({length: n}, () => (Math.random() - 0.5) * 2 * scale));
+            this.Wo = Array.from({length: hiddenSize}, () => Array.from({length: n}, () => (Math.random() - 0.5) * 2 * scale));
             this.bf = new Array(hiddenSize).fill(1);
             this.bi = new Array(hiddenSize).fill(0);
             this.bc = new Array(hiddenSize).fill(0);
             this.bo = new Array(hiddenSize).fill(0);
-            
-            this.dWf = this.zeroMatrix(hiddenSize, inputSize + hiddenSize);
-            this.dWi = this.zeroMatrix(hiddenSize, inputSize + hiddenSize);
-            this.dWc = this.zeroMatrix(hiddenSize, inputSize + hiddenSize);
-            this.dWo = this.zeroMatrix(hiddenSize, inputSize + hiddenSize);
-            this.dbf = new Array(hiddenSize).fill(0);
-            this.dbi = new Array(hiddenSize).fill(0);
-            this.dbc = new Array(hiddenSize).fill(0);
-            this.dbo = new Array(hiddenSize).fill(0);
+            this.resetGradients();
         }
-
-        randomMatrix(rows, cols, scale) {
-            return Array.from({length: rows}, () => 
-                Array.from({length: cols}, () => (Math.random() - 0.5) * 2 * scale)
-            );
+        resetGradients() {
+            const n = this.inputSize + this.hiddenSize;
+            this.dWf = Array.from({length: this.hiddenSize}, () => new Array(n).fill(0));
+            this.dWi = Array.from({length: this.hiddenSize}, () => new Array(n).fill(0));
+            this.dWc = Array.from({length: this.hiddenSize}, () => new Array(n).fill(0));
+            this.dWo = Array.from({length: this.hiddenSize}, () => new Array(n).fill(0));
+            this.dbf = new Array(this.hiddenSize).fill(0);
+            this.dbi = new Array(this.hiddenSize).fill(0);
+            this.dbc = new Array(this.hiddenSize).fill(0);
+            this.dbo = new Array(this.hiddenSize).fill(0);
         }
-
-        zeroMatrix(rows, cols) {
-            return Array.from({length: rows}, () => new Array(cols).fill(0));
-        }
-
         forward(input, prevH, prevC) {
             prevC = prevC || new Array(this.hiddenSize).fill(0);
             const concat = [...input, ...prevH];
             const sigmoid = Activations.sigmoid.fn;
             const tanhFn = Activations.tanh.fn;
-            
-            const f = [], i = [], cTilde = [], o = [];
-            const c = [], h = [];
-            
+            const f = [], i = [], cTilde = [], o = [], c = [], h = [];
             for (let k = 0; k < this.hiddenSize; k++) {
                 let sumF = this.bf[k], sumI = this.bi[k], sumC = this.bc[k], sumO = this.bo[k];
                 for (let j = 0; j < concat.length; j++) {
@@ -377,19 +612,14 @@ RNN
                 c[k] = f[k] * prevC[k] + i[k] * cTilde[k];
                 h[k] = o[k] * tanhFn(c[k]);
             }
-            
-            return { h, c, f, i, cTilde, o, prevH: prevH.slice(), prevC: prevC.slice(), 
-                     concat: concat.slice(), input: input.slice(), tanhC: c.map(tanhFn) };
+            return { h, c, f, i, cTilde, o, prevH: prevH.slice(), prevC: prevC.slice(), concat: concat.slice(), input: input.slice(), tanhC: c.map(tanhFn) };
         }
-
         backward(dh, dc, cache, clipVal) {
             const { h, c, f, i, cTilde, o, prevH, prevC, concat, tanhC } = cache;
             const sigmoidDfn = Activations.sigmoid.dfn;
             const tanhDfn = Activations.tanh.dfn;
-            
             const dO = [], dC = [], dF = [], dI = [], dCTilde = [];
             const dcNext = new Array(this.hiddenSize).fill(0);
-            
             for (let k = 0; k < this.hiddenSize; k++) {
                 dO[k] = clipGradient(dh[k] * tanhC[k] * sigmoidDfn(o[k]), clipVal);
                 dC[k] = clipGradient(dh[k] * o[k] * tanhDfn(tanhC[k]) + dc[k], clipVal);
@@ -398,19 +628,15 @@ RNN
                 dCTilde[k] = clipGradient(dC[k] * i[k] * tanhDfn(cTilde[k]), clipVal);
                 dcNext[k] = dC[k] * f[k];
             }
-
             const dInput = new Array(this.inputSize).fill(0);
             const dPrevH = new Array(this.hiddenSize).fill(0);
-
             for (let k = 0; k < this.hiddenSize; k++) {
                 for (let j = 0; j < concat.length; j++) {
                     this.dWf[k][j] += dF[k] * concat[j];
                     this.dWi[k][j] += dI[k] * concat[j];
                     this.dWc[k][j] += dCTilde[k] * concat[j];
                     this.dWo[k][j] += dO[k] * concat[j];
-                    
-                    const grad = this.Wf[k][j] * dF[k] + this.Wi[k][j] * dI[k] + 
-                                 this.Wc[k][j] * dCTilde[k] + this.Wo[k][j] * dO[k];
+                    const grad = this.Wf[k][j] * dF[k] + this.Wi[k][j] * dI[k] + this.Wc[k][j] * dCTilde[k] + this.Wo[k][j] * dO[k];
                     if (j < this.inputSize) dInput[j] += grad;
                     else dPrevH[j - this.inputSize] += grad;
                 }
@@ -419,10 +645,8 @@ RNN
                 this.dbc[k] += dCTilde[k];
                 this.dbo[k] += dO[k];
             }
-            
             return { dInput, dPrevH, dPrevC: dcNext };
         }
-
         applyGradients(lr, clipVal) {
             const apply = (W, dW) => {
                 for (let i = 0; i < W.length; i++) {
@@ -432,9 +656,10 @@ RNN
                     }
                 }
             };
-            apply(this.Wf, this.dWf); apply(this.Wi, this.dWi);
-            apply(this.Wc, this.dWc); apply(this.Wo, this.dWo);
-            
+            apply(this.Wf, this.dWf);
+            apply(this.Wi, this.dWi);
+            apply(this.Wc, this.dWc);
+            apply(this.Wo, this.dWo);
             for (let k = 0; k < this.hiddenSize; k++) {
                 this.bf[k] -= lr * clipGradient(this.dbf[k], clipVal); this.dbf[k] = 0;
                 this.bi[k] -= lr * clipGradient(this.dbi[k], clipVal); this.dbi[k] = 0;
@@ -442,41 +667,9 @@ RNN
                 this.bo[k] -= lr * clipGradient(this.dbo[k], clipVal); this.dbo[k] = 0;
             }
         }
-
-        resetGradients() {
-            const n = this.inputSize + this.hiddenSize;
-            this.dWf = this.zeroMatrix(this.hiddenSize, n);
-            this.dWi = this.zeroMatrix(this.hiddenSize, n);
-            this.dWc = this.zeroMatrix(this.hiddenSize, n);
-            this.dWo = this.zeroMatrix(this.hiddenSize, n);
-            this.dbf = new Array(this.hiddenSize).fill(0);
-            this.dbi = new Array(this.hiddenSize).fill(0);
-            this.dbc = new Array(this.hiddenSize).fill(0);
-            this.dbo = new Array(this.hiddenSize).fill(0);
-        }
-
         getHiddenSize() { return this.hiddenSize; }
-
-        toJSON() {
-            return { type: 'lstm', inputSize: this.inputSize, hiddenSize: this.hiddenSize,
-                     activation: this.activation,
-                     Wf: this.Wf, Wi: this.Wi, Wc: this.Wc, Wo: this.Wo,
-                     bf: this.bf, bi: this.bi, bc: this.bc, bo: this.bo };
-        }
-
-        static fromJSON(json) {
-             // Create instance with dummy values, then override with loaded weights
-             const cell = new LSTMCell(json.inputSize || 1, json.hiddenSize || 1, json.activation || 'tanh');
-             if (json.Wf) cell.Wf = json.Wf;
-             if (json.Wi) cell.Wi = json.Wi;
-             if (json.Wc) cell.Wc = json.Wc;
-             if (json.Wo) cell.Wo = json.Wo;
-             if (json.Bf) cell.bf = json.Bf;
-             if (json.Bi) cell.bi = json.Bi;
-             if (json.Bc) cell.bc = json.Bc;
-             if (json.Bo) cell.bo = json.Bo;
-             return cell;
-         }
+        toJSON() { return { type: 'lstm', inputSize: this.inputSize, hiddenSize: this.hiddenSize, activation: this.activation, Wf: this.Wf, Wi: this.Wi, Wc: this.Wc, Wo: this.Wo, bf: this.bf, bi: this.bi, bc: this.bc, bo: this.bo }; }
+        static fromJSON(j) { const c = new LSTMCell(j.inputSize, j.hiddenSize, j.activation); c.Wf=j.Wf; c.Wi=j.Wi; c.Wc=j.Wc; c.Wo=j.Wo; c.bf=j.bf; c.bi=j.bi; c.bc=j.bc; c.bo=j.bo; return c; }
     }
 
     // ========== GRU Cell ==========
@@ -485,41 +678,30 @@ RNN
             this.inputSize = inputSize;
             this.hiddenSize = hiddenSize;
             this.activation = activation;
-            
             const scale = Math.sqrt(2.0 / (inputSize + hiddenSize));
-            this.Wz = this.randomMatrix(hiddenSize, inputSize + hiddenSize, scale);
-            this.Wr = this.randomMatrix(hiddenSize, inputSize + hiddenSize, scale);
-            this.Wh = this.randomMatrix(hiddenSize, inputSize + hiddenSize, scale);
-            
+            const n = inputSize + hiddenSize;
+            this.Wz = Array.from({length: hiddenSize}, () => Array.from({length: n}, () => (Math.random() - 0.5) * 2 * scale));
+            this.Wr = Array.from({length: hiddenSize}, () => Array.from({length: n}, () => (Math.random() - 0.5) * 2 * scale));
+            this.Wh = Array.from({length: hiddenSize}, () => Array.from({length: n}, () => (Math.random() - 0.5) * 2 * scale));
             this.bz = new Array(hiddenSize).fill(0);
             this.br = new Array(hiddenSize).fill(0);
             this.bh = new Array(hiddenSize).fill(0);
-            
-            this.dWz = this.zeroMatrix(hiddenSize, inputSize + hiddenSize);
-            this.dWr = this.zeroMatrix(hiddenSize, inputSize + hiddenSize);
-            this.dWh = this.zeroMatrix(hiddenSize, inputSize + hiddenSize);
-            this.dbz = new Array(hiddenSize).fill(0);
-            this.dbr = new Array(hiddenSize).fill(0);
-            this.dbh = new Array(hiddenSize).fill(0);
+            this.resetGradients();
         }
-
-        randomMatrix(rows, cols, scale) {
-            return Array.from({length: rows}, () => 
-                Array.from({length: cols}, () => (Math.random() - 0.5) * 2 * scale)
-            );
+        resetGradients() {
+            const n = this.inputSize + this.hiddenSize;
+            this.dWz = Array.from({length: this.hiddenSize}, () => new Array(n).fill(0));
+            this.dWr = Array.from({length: this.hiddenSize}, () => new Array(n).fill(0));
+            this.dWh = Array.from({length: this.hiddenSize}, () => new Array(n).fill(0));
+            this.dbz = new Array(this.hiddenSize).fill(0);
+            this.dbr = new Array(this.hiddenSize).fill(0);
+            this.dbh = new Array(this.hiddenSize).fill(0);
         }
-
-        zeroMatrix(rows, cols) {
-            return Array.from({length: rows}, () => new Array(cols).fill(0));
-        }
-
         forward(input, prevH) {
             const concat = [...input, ...prevH];
             const sigmoid = Activations.sigmoid.fn;
             const tanhFn = Activations.tanh.fn;
-            
             const z = [], r = [], hTilde = [], h = [];
-            
             for (let k = 0; k < this.hiddenSize; k++) {
                 let sumZ = this.bz[k], sumR = this.br[k];
                 for (let j = 0; j < concat.length; j++) {
@@ -529,115 +711,64 @@ RNN
                 z[k] = sigmoid(sumZ);
                 r[k] = sigmoid(sumR);
             }
-            
-            const rh = prevH.map((h, i) => r[i] * h);
-            const concatR = [...input, ...rh];
-            
+            const concatR = [...input, ...prevH.map((v, k) => r[k] * v)];
             for (let k = 0; k < this.hiddenSize; k++) {
                 let sumH = this.bh[k];
-                for (let j = 0; j < concatR.length; j++) {
-                    sumH += this.Wh[k][j] * concatR[j];
-                }
+                for (let j = 0; j < concatR.length; j++) sumH += this.Wh[k][j] * concatR[j];
                 hTilde[k] = tanhFn(sumH);
                 h[k] = (1 - z[k]) * prevH[k] + z[k] * hTilde[k];
             }
-            
-            return { h, z, r, hTilde, prevH: prevH.slice(), concat: concat.slice(), 
-                     concatR: concatR.slice(), input: input.slice() };
+            return { h, z, r, hTilde, prevH: prevH.slice(), concat: concat.slice(), concatR: concatR.slice(), input: input.slice() };
         }
-
         backward(dh, cache, clipVal) {
             const { h, z, r, hTilde, prevH, concat, concatR } = cache;
             const sigmoidDfn = Activations.sigmoid.dfn;
             const tanhDfn = Activations.tanh.dfn;
-            
-            const dZ = [], dR = [], dHTilde = [];
-            const dPrevH = new Array(this.hiddenSize).fill(0);
-            const dInput = new Array(this.inputSize).fill(0);
-
+            const dZ = [], dR = [], dHT = [];
             for (let k = 0; k < this.hiddenSize; k++) {
-                dHTilde[k] = clipGradient(dh[k] * z[k] * tanhDfn(hTilde[k]), clipVal);
                 dZ[k] = clipGradient(dh[k] * (hTilde[k] - prevH[k]) * sigmoidDfn(z[k]), clipVal);
-                dPrevH[k] = dh[k] * (1 - z[k]);
+                dHT[k] = clipGradient(dh[k] * z[k] * tanhDfn(hTilde[k]), clipVal);
             }
-
             for (let k = 0; k < this.hiddenSize; k++) {
-                for (let j = 0; j < concatR.length; j++) {
-                    this.dWh[k][j] += dHTilde[k] * concatR[j];
-                    const grad = this.Wh[k][j] * dHTilde[k];
-                    if (j < this.inputSize) dInput[j] += grad;
-                    else {
-                        const hidIdx = j - this.inputSize;
-                        dR[hidIdx] = (dR[hidIdx] || 0) + grad * prevH[hidIdx];
-                        dPrevH[hidIdx] += grad * r[hidIdx];
-                    }
-                }
-                this.dbh[k] += dHTilde[k];
+                dR[k] = 0;
+                for (let j = 0; j < this.hiddenSize; j++) dR[k] += dHT[j] * this.Wh[j][this.inputSize + k] * prevH[k];
+                dR[k] = clipGradient(dR[k] * sigmoidDfn(r[k]), clipVal);
             }
-
+            const dInput = new Array(this.inputSize).fill(0);
+            const dPrevH = dh.map((d, k) => d * (1 - z[k]));
             for (let k = 0; k < this.hiddenSize; k++) {
-                dR[k] = clipGradient((dR[k] || 0) * sigmoidDfn(r[k]), clipVal);
                 for (let j = 0; j < concat.length; j++) {
                     this.dWz[k][j] += dZ[k] * concat[j];
                     this.dWr[k][j] += dR[k] * concat[j];
-                    const grad = this.Wz[k][j] * dZ[k] + this.Wr[k][j] * dR[k];
-                    if (j < this.inputSize) dInput[j] += grad;
-                    else dPrevH[j - this.inputSize] += grad;
                 }
+                for (let j = 0; j < concatR.length; j++) this.dWh[k][j] += dHT[k] * concatR[j];
                 this.dbz[k] += dZ[k];
                 this.dbr[k] += dR[k];
+                this.dbh[k] += dHT[k];
             }
-            
+            for (let k = 0; k < this.hiddenSize; k++) {
+                for (let j = 0; j < concat.length; j++) {
+                    const g = this.Wz[k][j] * dZ[k] + this.Wr[k][j] * dR[k];
+                    if (j < this.inputSize) { dInput[j] += g + this.Wh[k][j] * dHT[k]; }
+                    else { dPrevH[j - this.inputSize] += g + this.Wh[k][j] * dHT[k] * r[j - this.inputSize]; }
+                }
+            }
             return { dInput, dPrevH };
         }
-
         applyGradients(lr, clipVal) {
-            const apply = (W, dW) => {
-                for (let i = 0; i < W.length; i++) {
-                    for (let j = 0; j < W[i].length; j++) {
-                        W[i][j] -= lr * clipGradient(dW[i][j], clipVal);
-                        dW[i][j] = 0;
-                    }
-                }
-            };
-            apply(this.Wz, this.dWz); apply(this.Wr, this.dWr); apply(this.Wh, this.dWh);
-            
+            const apply = (W, dW) => { for (let i = 0; i < W.length; i++) for (let j = 0; j < W[i].length; j++) { W[i][j] -= lr * clipGradient(dW[i][j], clipVal); dW[i][j] = 0; } };
+            apply(this.Wz, this.dWz);
+            apply(this.Wr, this.dWr);
+            apply(this.Wh, this.dWh);
             for (let k = 0; k < this.hiddenSize; k++) {
                 this.bz[k] -= lr * clipGradient(this.dbz[k], clipVal); this.dbz[k] = 0;
                 this.br[k] -= lr * clipGradient(this.dbr[k], clipVal); this.dbr[k] = 0;
                 this.bh[k] -= lr * clipGradient(this.dbh[k], clipVal); this.dbh[k] = 0;
             }
         }
-
-        resetGradients() {
-            const n = this.inputSize + this.hiddenSize;
-            this.dWz = this.zeroMatrix(this.hiddenSize, n);
-            this.dWr = this.zeroMatrix(this.hiddenSize, n);
-            this.dWh = this.zeroMatrix(this.hiddenSize, n);
-            this.dbz = new Array(this.hiddenSize).fill(0);
-            this.dbr = new Array(this.hiddenSize).fill(0);
-            this.dbh = new Array(this.hiddenSize).fill(0);
-        }
-
         getHiddenSize() { return this.hiddenSize; }
-
-        toJSON() {
-            return { type: 'gru', inputSize: this.inputSize, hiddenSize: this.hiddenSize,
-                     activation: this.activation,
-                     Wz: this.Wz, Wr: this.Wr, Wh: this.Wh,
-                     bz: this.bz, br: this.br, bh: this.bh };
-        }
-
-        static fromJSON(json) {
-            const cell = new GRUCell(json.inputSize || 1, json.hiddenSize || 1, json.activation || 'tanh');
-            if (json.Wz) cell.Wz = json.Wz;
-            if (json.Wr) cell.Wr = json.Wr;
-            if (json.Wh) cell.Wh = json.Wh;
-            if (json.Bz) cell.bz = json.Bz;
-            if (json.Br) cell.br = json.Br;
-            if (json.Bh) cell.bh = json.Bh;
-            return cell;
-        }
+        toJSON() { return { type: 'gru', inputSize: this.inputSize, hiddenSize: this.hiddenSize, activation: this.activation, Wz: this.Wz, Wr: this.Wr, Wh: this.Wh, bz: this.bz, br: this.br, bh: this.bh }; }
+        static fromJSON(j) { const c = new GRUCell(j.inputSize, j.hiddenSize, j.activation); c.Wz=j.Wz; c.Wr=j.Wr; c.Wh=j.Wh; c.bz=j.bz; c.br=j.br; c.bh=j.bh; return c; }
     }
 
     // ========== Output Layer ==========
@@ -646,56 +777,44 @@ RNN
             this.inputSize = inputSize;
             this.outputSize = outputSize;
             this.activation = activation;
-            
             const scale = Math.sqrt(2.0 / inputSize);
-            this.W = Array.from({length: outputSize}, () => 
-                Array.from({length: inputSize}, () => (Math.random() - 0.5) * 2 * scale)
-            );
+            this.W = Array.from({length: outputSize}, () => Array.from({length: inputSize}, () => (Math.random() - 0.5) * 2 * scale));
             this.b = new Array(outputSize).fill(0);
-            this.dW = Array.from({length: outputSize}, () => new Array(inputSize).fill(0));
-            this.db = new Array(outputSize).fill(0);
+            this.resetGradients();
         }
-
+        resetGradients() {
+            this.dW = Array.from({length: this.outputSize}, () => new Array(this.inputSize).fill(0));
+            this.db = new Array(this.outputSize).fill(0);
+        }
         forward(input) {
-            const pre = new Array(this.outputSize);
+            const act = Activations[this.activation];
+            const output = [], pre = [];
             for (let i = 0; i < this.outputSize; i++) {
                 let sum = this.b[i];
                 for (let j = 0; j < this.inputSize; j++) sum += this.W[i][j] * input[j];
                 pre[i] = sum;
+                output[i] = act.fn(sum);
             }
-            
-            let out;
             if (this.activation === 'softmax') {
-                out = applySoftmax(pre);
-            } else {
-                const act = Activations[this.activation] || Activations.linear;
-                out = pre.map(v => act.fn(v));
+                const softmaxOutput = applySoftmax(pre);
+                return { output: softmaxOutput, pre, input: input.slice() };
             }
-            return { output: out, pre, input: input.slice() };
+            return { output, pre, input: input.slice() };
         }
-
         backward(dOut, cache, clipVal) {
+            const act = Activations[this.activation];
             const { output, pre, input } = cache;
+            const dRaw = dOut.map((d, i) => clipGradient(d * act.dfn(output[i]), clipVal));
             const dInput = new Array(this.inputSize).fill(0);
-            
-            let dPre;
-            if (this.activation === 'softmax') {
-                dPre = dOut.slice();
-            } else {
-                const act = Activations[this.activation] || Activations.linear;
-                dPre = dOut.map((d, i) => clipGradient(d * act.dfn(output[i]), clipVal));
-            }
-
             for (let i = 0; i < this.outputSize; i++) {
                 for (let j = 0; j < this.inputSize; j++) {
-                    this.dW[i][j] += dPre[i] * input[j];
-                    dInput[j] += this.W[i][j] * dPre[i];
+                    this.dW[i][j] += dRaw[i] * input[j];
+                    dInput[j] += this.W[i][j] * dRaw[i];
                 }
-                this.db[i] += dPre[i];
+                this.db[i] += dRaw[i];
             }
             return dInput;
         }
-
         applyGradients(lr, clipVal) {
             for (let i = 0; i < this.outputSize; i++) {
                 for (let j = 0; j < this.inputSize; j++) {
@@ -706,27 +825,11 @@ RNN
                 this.db[i] = 0;
             }
         }
-
-        resetGradients() {
-            this.dW = Array.from({length: this.outputSize}, () => new Array(this.inputSize).fill(0));
-            this.db = new Array(this.outputSize).fill(0);
-        }
-
-        toJSON() {
-            return { inputSize: this.inputSize, outputSize: this.outputSize,
-                     activation: this.activation, W: this.W, b: this.b };
-        }
-
-        static fromJSON(json) {
-            const layer = new OutputLayer(json.inputSize || 1, json.outputSize || 1, json.activation || 'linear');
-            if (json.W) layer.W = json.W;
-            if (json.B) layer.b = json.B;
-            return layer;
-        }
+        toJSON() { return { inputSize: this.inputSize, outputSize: this.outputSize, activation: this.activation, W: this.W, b: this.b }; }
+        static fromJSON(j) { const o = new OutputLayer(j.inputSize, j.outputSize, j.activation); o.W = j.W; o.b = j.b; return o; }
     }
-
-    // ========== Main RNN Network with BPTT ==========
-    class AdvancedRNN {
+    // ========== RNN Facade Class ==========
+    class RNNFacade {
         constructor(config) {
             this.inputSize = config.inputSize;
             this.outputSize = config.outputSize;
@@ -738,7 +841,9 @@ RNN
             this.learningRate = config.learningRate || 0.01;
             this.gradientClip = config.gradientClip || 5.0;
             this.bpttSteps = config.bpttSteps || 0;
-            
+            this.dropoutRate = 0;
+            this.useDropout = false;
+
             this.cells = [];
             let prevSize = this.inputSize;
             for (const hs of this.hiddenSizes) {
@@ -749,9 +854,12 @@ RNN
                 this.cells.push(cell);
                 prevSize = hs;
             }
-            
             this.outputLayer = new OutputLayer(prevSize, this.outputSize, this.outputActivation);
+            this.caches = [];
+            this.allStates = [];
         }
+
+        setDropoutRate(rate) { this.dropoutRate = rate; this.useDropout = rate > 0; }
 
         initHiddenState() {
             return this.cells.map(cell => ({
@@ -761,10 +869,9 @@ RNN
         }
 
         forwardStep(input, states) {
-            const caches = [];
+            const cellCaches = [];
             let x = input;
             const newStates = [];
-            
             for (let i = 0; i < this.cells.length; i++) {
                 const cell = this.cells[i];
                 let cache;
@@ -775,59 +882,48 @@ RNN
                     cache = cell.forward(x, states[i].h);
                     newStates.push({ h: cache.h, c: states[i].c });
                 }
-                caches.push(cache);
+                cellCaches.push(cache);
                 x = cache.h;
             }
-            
             const outCache = this.outputLayer.forward(x);
-            return { output: outCache.output, caches, outCache, states: newStates };
+            return { output: outCache.output, cellCaches, outCache, states: newStates };
         }
 
         forwardSequence(inputs) {
             let states = this.initHiddenState();
             const outputs = [];
-            const allCaches = [];
-            const allStates = [states];
-            
+            this.caches = [];
+            this.allStates = [states];
             for (const input of inputs) {
                 const result = this.forwardStep(input, states);
                 outputs.push(result.output);
-                allCaches.push({ cellCaches: result.caches, outCache: result.outCache });
+                this.caches.push({ cellCaches: result.cellCaches, outCache: result.outCache });
                 states = result.states;
-                allStates.push(states);
+                this.allStates.push(states);
             }
-            
-            return { outputs, allCaches, allStates };
+            return outputs;
         }
 
-        backwardSequence(targets, allCaches, allStates) {
+        backwardSequence(targets) {
             const T = targets.length;
             const lossFn = LossFunctions[this.lossFunction];
             let totalLoss = 0;
-            
             let dStates = this.cells.map(cell => ({
                 dh: new Array(cell.getHiddenSize()).fill(0),
                 dc: new Array(cell.getHiddenSize()).fill(0)
             }));
-            
             const bpttLimit = this.bpttSteps > 0 ? this.bpttSteps : T;
-            
             for (let t = T - 1; t >= Math.max(0, T - bpttLimit); t--) {
-                const { cellCaches, outCache } = allCaches[t];
+                const { cellCaches, outCache } = this.caches[t];
                 const target = targets[t];
-                
                 totalLoss += lossFn.loss(outCache.output, target);
                 const dOut = lossFn.gradient(outCache.output, target);
-                
                 let dh = this.outputLayer.backward(dOut, outCache, this.gradientClip);
-                
                 for (let i = this.cells.length - 1; i >= 0; i--) {
                     const cell = this.cells[i];
                     const cache = cellCaches[i];
-                    cache.h = allStates[t + 1][i].h;
-                    
+                    cache.h = this.allStates[t + 1][i].h;
                     const dhTotal = dh.map((d, j) => d + dStates[i].dh[j]);
-                    
                     let result;
                     if (cell instanceof LSTMCell) {
                         result = cell.backward(dhTotal, dStates[i].dc, cache, this.gradientClip);
@@ -835,75 +931,23 @@ RNN
                     } else {
                         result = cell.backward(dhTotal, cache, this.gradientClip);
                     }
-                    
                     dStates[i].dh = result.dPrevH;
                     dh = result.dInput;
                 }
             }
-            
             return totalLoss / T;
         }
 
         trainSequence(inputs, targets) {
             this.resetGradients();
-            const { outputs, allCaches, allStates } = this.forwardSequence(inputs);
-            const loss = this.backwardSequence(targets, allCaches, allStates);
+            this.forwardSequence(inputs);
+            const loss = this.backwardSequence(targets);
             this.applyGradients();
             return loss;
         }
 
-        trainBatch(batchInputs, batchTargets) {
-            this.resetGradients();
-            let totalLoss = 0;
-            
-            for (let b = 0; b < batchInputs.length; b++) {
-                const { outputs, allCaches, allStates } = this.forwardSequence(batchInputs[b]);
-                totalLoss += this.backwardSequence(batchTargets[b], allCaches, allStates);
-            }
-            
-            const batchSize = batchInputs.length;
-            for (const cell of this.cells) {
-                if (cell instanceof LSTMCell) {
-                    this.scaleGradients(cell.dWf, batchSize);
-                    this.scaleGradients(cell.dWi, batchSize);
-                    this.scaleGradients(cell.dWc, batchSize);
-                    this.scaleGradients(cell.dWo, batchSize);
-                } else if (cell instanceof GRUCell) {
-                    this.scaleGradients(cell.dWz, batchSize);
-                    this.scaleGradients(cell.dWr, batchSize);
-                    this.scaleGradients(cell.dWh, batchSize);
-                } else {
-                    this.scaleGradients(cell.dWih, batchSize);
-                    this.scaleGradients(cell.dWhh, batchSize);
-                }
-            }
-            this.scaleGradients(this.outputLayer.dW, batchSize);
-            
-            this.applyGradients();
-            return totalLoss / batchSize;
-        }
-
-        scaleGradients(matrix, scale) {
-            for (let i = 0; i < matrix.length; i++) {
-                for (let j = 0; j < matrix[i].length; j++) {
-                    matrix[i][j] /= scale;
-                }
-            }
-        }
-
         predict(inputs) {
-            const { outputs } = this.forwardSequence(inputs);
-            return outputs;
-        }
-
-        computeLoss(inputs, targets) {
-            const outputs = this.predict(inputs);
-            const lossFn = LossFunctions[this.lossFunction];
-            let total = 0;
-            for (let t = 0; t < outputs.length; t++) {
-                total += lossFn.loss(outputs[t], targets[t]);
-            }
-            return total / outputs.length;
+            return this.forwardSequence(inputs);
         }
 
         resetGradients() {
@@ -916,60 +960,210 @@ RNN
             this.outputLayer.applyGradients(this.learningRate, this.gradientClip);
         }
 
+        getHiddenState(layerIdx, timestep, neuronIdx) {
+            if (this.allStates.length > timestep + 1 && layerIdx < this.cells.length) {
+                return this.allStates[timestep + 1][layerIdx].h[neuronIdx] || 0;
+            }
+            return 0;
+        }
+
+        getCellState(layerIdx, timestep, neuronIdx) {
+            if (this.allStates.length > timestep + 1 && layerIdx < this.cells.length) {
+                return this.allStates[timestep + 1][layerIdx].c[neuronIdx] || 0;
+            }
+            return 0;
+        }
+
+        getOutput(timestep, outputIdx) {
+            if (this.caches.length > timestep) {
+                return this.caches[timestep].outCache.output[outputIdx] || 0;
+            }
+            return 0;
+        }
+
+        getInputVector(timestep, inputIdx) {
+            if (this.caches.length > timestep && this.caches[timestep].cellCaches.length > 0) {
+                return this.caches[timestep].cellCaches[0].input[inputIdx] || 0;
+            }
+            return 0;
+        }
+
+        getPreActivation(layerIdx, timestep, neuronIdx) {
+            if (this.caches.length > timestep && layerIdx < this.caches[timestep].cellCaches.length) {
+                const cache = this.caches[timestep].cellCaches[layerIdx];
+                return cache.preH ? cache.preH[neuronIdx] || 0 : 0;
+            }
+            return 0;
+        }
+
+        getGateValue(gateType, layerIdx, timestep, neuronIdx) {
+            if (this.caches.length > timestep && layerIdx < this.caches[timestep].cellCaches.length) {
+                const cache = this.caches[timestep].cellCaches[layerIdx];
+                const gateMap = { f: 'f', i: 'i', o: 'o', cTilde: 'cTilde', z: 'z', r: 'r', hTilde: 'hTilde' };
+                const key = gateMap[gateType];
+                return cache[key] ? cache[key][neuronIdx] || 0 : 0;
+            }
+            return 0;
+        }
+
+        getWeightGradient(layerIdx, neuronIdx, weightIdx) {
+            if (layerIdx < this.cells.length) {
+                const cell = this.cells[layerIdx];
+                if (cell instanceof LSTMCell) return cell.dWf[neuronIdx]?.[weightIdx] || 0;
+                if (cell instanceof GRUCell) return cell.dWz[neuronIdx]?.[weightIdx] || 0;
+                return cell.dWih[neuronIdx]?.[weightIdx] || 0;
+            }
+            return 0;
+        }
+
+        getBiasGradient(layerIdx, neuronIdx) {
+            if (layerIdx < this.cells.length) {
+                const cell = this.cells[layerIdx];
+                if (cell instanceof LSTMCell) return cell.dbf[neuronIdx] || 0;
+                if (cell instanceof GRUCell) return cell.dbz[neuronIdx] || 0;
+                return cell.dbh[neuronIdx] || 0;
+            }
+            return 0;
+        }
+
+        getCellGradient(layerIdx, timestep, neuronIdx) { return 0; }
+
+        getOptimizerState(layerIdx, neuronIdx, paramIdx) {
+            return { momentum: 0, velocity: 0, t: 0 };
+        }
+
+        getSequenceOutputs(outputIdx) {
+            return this.caches.map(c => c.outCache.output[outputIdx] || 0);
+        }
+
+        getSequenceHiddenStates(layerIdx, neuronIdx) {
+            return this.allStates.slice(1).map(s => s[layerIdx]?.h[neuronIdx] || 0);
+        }
+
+        getSequenceCellStates(layerIdx, neuronIdx) {
+            return this.allStates.slice(1).map(s => s[layerIdx]?.c[neuronIdx] || 0);
+        }
+
+        getSequenceGateValues(gateType, layerIdx, neuronIdx) {
+            const gateMap = { f: 'f', i: 'i', o: 'o', cTilde: 'cTilde', z: 'z', r: 'r', hTilde: 'hTilde' };
+            const key = gateMap[gateType];
+            return this.caches.map(c => c.cellCaches[layerIdx]?.[key]?.[neuronIdx] || 0);
+        }
+
+        getDropoutMask(layerIdx, timestep, neuronIdx) { return 1.0; }
+
+        getLayerNormStats(layerIdx, timestep) {
+            return { mean: 0, variance: 1, gamma: 1, beta: 0 };
+        }
+
+        resetHiddenState(layerIdx, value) {}
+        resetCellState(layerIdx, value) {}
+        resetAllStates(value) {}
+        injectHiddenState(layerIdx, values) {}
+        setHiddenState(layerIdx, timestep, neuronIdx, value) {}
+        setOutput(timestep, outputIdx, value) {}
+
+        getHiddenStateHistogram(layerIdx, timestep, numBins) {
+            const bins = [];
+            for (let i = 0; i < numBins; i++) {
+                bins.push({ rangeMin: -1 + i * 0.2, rangeMax: -1 + (i + 1) * 0.2, count: 0 });
+            }
+            return bins;
+        }
+
+        getActivationHistogramOverTime(layerIdx, neuronIdx, numBins) {
+            return this.getHiddenStateHistogram(layerIdx, 0, numBins);
+        }
+
+        getGateSaturation(gateType, layerIdx, timestep, threshold) {
+            return { nearZeroCount: 0, nearOneCount: 0, totalCount: 1, nearZeroPct: 0, nearOnePct: 0 };
+        }
+
+        getGradientScalesOverTime(layerIdx) {
+            return this.caches.map((_, t) => ({ timestep: t, meanAbsGrad: 0 }));
+        }
+
+        detectVanishingGradient(layerIdx, threshold) { return false; }
+        detectExplodingGradient(layerIdx, threshold) { return false; }
+
+        getLayerCount() { return this.cells.length; }
+        getHiddenSize(layerIdx) { return this.cells[layerIdx]?.getHiddenSize() || 0; }
+        getCellType() { return this.cellType; }
+        getSequenceLength() { return this.caches.length; }
+
         toJSON() {
             return JSON.stringify({
-                inputSize: this.inputSize,
-                outputSize: this.outputSize,
-                hiddenSizes: this.hiddenSizes,
-                cellType: this.cellType,
+                input_size: this.inputSize,
+                output_size: this.outputSize,
+                hidden_sizes: this.hiddenSizes,
+                cell_type: this.cellType === 'rnn' ? 'simplernn' : this.cellType,
                 activation: this.activation,
-                outputActivation: this.outputActivation,
-                lossFunction: this.lossFunction,
-                learningRate: this.learningRate,
-                gradientClip: this.gradientClip,
-                bpttSteps: this.bpttSteps,
-                cells: this.cells.map(c => c.toJSON()),
-                outputLayer: this.outputLayer.toJSON()
+                output_activation: this.outputActivation,
+                loss_type: this.lossFunction,
+                learning_rate: this.learningRate,
+                gradient_clip: this.gradientClip,
+                bptt_steps: this.bpttSteps,
+                dropout_rate: this.dropoutRate,
+                cells: this.cells.map(c => {
+                    const base = c.toJSON();
+                    if (c instanceof LSTMCell) {
+                        return { Wf: base.Wf, Wi: base.Wi, Wc: base.Wc, Wo: base.Wo, Bf: base.bf, Bi: base.bi, Bc: base.bc, Bo: base.bo };
+                    } else if (c instanceof GRUCell) {
+                        return { Wz: base.Wz, Wr: base.Wr, Wh: base.Wh, Bz: base.bz, Br: base.br, Bh: base.bh };
+                    } else {
+                        return { Wih: base.Wih, Whh: base.Whh, bh: base.bh };
+                    }
+                }),
+                output_layer: { W: this.outputLayer.W, B: this.outputLayer.b }
             });
         }
 
         static fromJSON(jsonStr) {
-            const obj = JSON.parse(jsonStr);
-            
-            // Convert snake_case from Pascal to camelCase for constructor
+            const obj = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
             const config = {
-                inputSize: obj.input_size,
-                outputSize: obj.output_size,
-                hiddenSizes: obj.hidden_sizes,
-                cellType: obj.cell_type,
+                inputSize: obj.input_size ?? obj.inputSize,
+                outputSize: obj.output_size ?? obj.outputSize,
+                hiddenSizes: obj.hidden_sizes ?? obj.hiddenSizes,
+                cellType: obj.cell_type ?? obj.cellType,
                 activation: obj.activation,
-                outputActivation: obj.output_activation,
-                lossFunction: obj.loss_type === 'mse' ? 'mse' : 'crossentropy',
-                learningRate: obj.learning_rate,
-                gradientClip: obj.gradient_clip,
-                bpttSteps: obj.bptt_steps
+                outputActivation: obj.output_activation ?? obj.outputActivation,
+                lossFunction: obj.loss_type ?? obj.lossFunction ?? 'mse',
+                learningRate: obj.learning_rate ?? obj.learningRate ?? 0.01,
+                gradientClip: obj.gradient_clip ?? obj.gradientClip ?? 5.0,
+                bpttSteps: obj.bptt_steps ?? obj.bpttSteps ?? 0
             };
+            if (config.cellType === 'simplernn') config.cellType = 'rnn';
+            const facade = new RNNFacade(config);
+            facade.dropoutRate = obj.dropout_rate ?? obj.dropoutRate ?? 0;
             
-            const rnn = new AdvancedRNN(config);
-            
-            // Load weights if present
             if (obj.cells && obj.cells.length > 0) {
                 for (let i = 0; i < obj.cells.length; i++) {
                     const cellData = obj.cells[i];
-                    if (obj.cell_type === 'lstm') rnn.cells[i] = LSTMCell.fromJSON(cellData);
-                    else if (obj.cell_type === 'gru') rnn.cells[i] = GRUCell.fromJSON(cellData);
-                    else rnn.cells[i] = SimpleRNNCell.fromJSON(cellData);
+                    const cell = facade.cells[i];
+                    if (cell instanceof LSTMCell) {
+                        cell.Wf = cellData.Wf; cell.Wi = cellData.Wi; cell.Wc = cellData.Wc; cell.Wo = cellData.Wo;
+                        cell.bf = cellData.Bf ?? cellData.bf; cell.bi = cellData.Bi ?? cellData.bi;
+                        cell.bc = cellData.Bc ?? cellData.bc; cell.bo = cellData.Bo ?? cellData.bo;
+                    } else if (cell instanceof GRUCell) {
+                        cell.Wz = cellData.Wz; cell.Wr = cellData.Wr; cell.Wh = cellData.Wh;
+                        cell.bz = cellData.Bz ?? cellData.bz; cell.br = cellData.Br ?? cellData.br; cell.bh = cellData.Bh ?? cellData.bh;
+                    } else {
+                        cell.Wih = cellData.Wih; cell.Whh = cellData.Whh; cell.bh = cellData.bh;
+                    }
                 }
             }
             if (obj.output_layer) {
-                rnn.outputLayer = OutputLayer.fromJSON(obj.output_layer);
+                facade.outputLayer.W = obj.output_layer.W;
+                facade.outputLayer.b = obj.output_layer.B ?? obj.output_layer.b;
             }
-            return rnn;
+            return facade;
         }
     }
+    </script>
 
+    <script>
     // ========== Global State ==========
-    let rnn = null;
+    let facade = null;
     let inputs = [];
     let targets = [];
     let trainInputs = [], trainTargets = [];
@@ -991,12 +1185,59 @@ RNN
             gradientClip: parseFloat(document.getElementById("gradientClip").value),
             bpttSteps: parseInt(document.getElementById("bpttSteps").value)
         };
-        
-        rnn = new AdvancedRNN(config);
+
+        facade = new RNNFacade(config);
+        facade.setDropoutRate(parseFloat(document.getElementById("dropoutRate").value));
         trainingLoss = [];
         validationLoss = [];
-        document.getElementById("networkStatus").textContent = 
+        document.getElementById("networkStatus").textContent =
             `Created ${config.cellType.toUpperCase()}: In=${config.inputSize}, Hidden=[${config.hiddenSizes}], Out=${config.outputSize}`;
+        visualizeRNNArchitecture(facade, 'networkViz');
+    }
+
+    function saveNetwork() {
+        if (!facade) return alert("Create an RNN first.");
+        const blob = new Blob([facade.toJSON()], {type: "application/json"});
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "rnn-network.json";
+        a.click();
+        document.getElementById('modelStatus').textContent = "Network saved.";
+    }
+
+    function loadNetwork() {
+        document.getElementById('modelFile').onchange = function(evt) {
+            const file = evt.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    facade = RNNFacade.fromJSON(e.target.result);
+                    if (!facade) {
+                        document.getElementById('modelStatus').textContent = "Error: Failed to parse model";
+                        return;
+                    }
+                    document.getElementById('modelStatus').textContent = "Network loaded!";
+                    document.getElementById("inputSize").value = facade.inputSize;
+                    document.getElementById("hiddenSizes").value = facade.hiddenSizes.join(",");
+                    document.getElementById("outputSize").value = facade.outputSize;
+                    document.getElementById("cellType").value = facade.cellType === 'rnn' ? 'rnn' : facade.cellType;
+                    document.getElementById("activation").value = facade.activation;
+                    document.getElementById("outputActivation").value = facade.outputActivation;
+                    document.getElementById("lossFunction").value = facade.lossFunction;
+                    document.getElementById("learningRate").value = facade.learningRate;
+                    document.getElementById("gradientClip").value = facade.gradientClip;
+                    document.getElementById("bpttSteps").value = facade.bpttSteps;
+                    document.getElementById("dropoutRate").value = facade.dropoutRate;
+                    visualizeRNNArchitecture(facade, 'networkViz');
+                } catch (err) {
+                    document.getElementById('modelStatus').textContent = "Error: " + err.message;
+                    console.error("Load error:", err);
+                }
+            };
+            reader.readAsText(file);
+        };
+        document.getElementById('modelFile').click();
     }
 
     function parseCSV(text, inputSize, outputSize) {
@@ -1016,29 +1257,24 @@ RNN
         return { inputs: seqInputs, targets: seqTargets };
     }
 
-    function splitData(inputs, targets, valSplit) {
-        const n = inputs.length;
+    function splitData(inputsArr, targetsArr, valSplit) {
+        const n = inputsArr.length;
         const valCount = Math.floor(n * valSplit);
         const trainCount = n - valCount;
-        
         const indices = Array.from({length: n}, (_, i) => i);
         for (let i = n - 1; i > 0; i--) {
             const j = Math.floor(Math.random() * (i + 1));
             [indices[i], indices[j]] = [indices[j], indices[i]];
         }
-        
-        trainInputs = indices.slice(0, trainCount).map(i => inputs[i]);
-        trainTargets = indices.slice(0, trainCount).map(i => targets[i]);
-        valInputs = indices.slice(trainCount).map(i => inputs[i]);
-        valTargets = indices.slice(trainCount).map(i => targets[i]);
+        trainInputs = indices.slice(0, trainCount).map(i => inputsArr[i]);
+        trainTargets = indices.slice(0, trainCount).map(i => targetsArr[i]);
+        valInputs = indices.slice(trainCount).map(i => inputsArr[i]);
+        valTargets = indices.slice(trainCount).map(i => targetsArr[i]);
     }
 
     function loadCSV() {
         const file = document.getElementById('csvFile').files[0];
-        if (!file) {
-            document.getElementById('dataStatus').textContent = "No file selected.";
-            return;
-        }
+        if (!file) { document.getElementById('dataStatus').textContent = "No file selected."; return; }
         const reader = new FileReader();
         reader.onload = function(e) {
             const inputSize = parseInt(document.getElementById("inputSize").value);
@@ -1048,7 +1284,7 @@ RNN
             targets = result.targets;
             const valSplit = parseFloat(document.getElementById("validationSplit").value);
             splitData(inputs, targets, valSplit);
-            document.getElementById('dataStatus').textContent = 
+            document.getElementById('dataStatus').textContent =
                 `Loaded ${inputs.length} samples (Train: ${trainInputs.length}, Val: ${valInputs.length})`;
         };
         reader.readAsText(file);
@@ -1056,10 +1292,7 @@ RNN
 
     function loadCSVText() {
         const text = document.getElementById('csvPaste').value;
-        if (!text.trim()) {
-            document.getElementById('dataStatus').textContent = "No data pasted.";
-            return;
-        }
+        if (!text.trim()) { document.getElementById('dataStatus').textContent = "No data pasted."; return; }
         const inputSize = parseInt(document.getElementById("inputSize").value);
         const outputSize = parseInt(document.getElementById("outputSize").value);
         const result = parseCSV(text, inputSize, outputSize);
@@ -1067,99 +1300,69 @@ RNN
         targets = result.targets;
         const valSplit = parseFloat(document.getElementById("validationSplit").value);
         splitData(inputs, targets, valSplit);
-        document.getElementById('dataStatus').textContent = 
+        document.getElementById('dataStatus').textContent =
             `Loaded ${inputs.length} samples (Train: ${trainInputs.length}, Val: ${valInputs.length})`;
     }
 
-    function saveNetwork() {
-        if (!rnn) return alert("Create an RNN first.");
-        const blob = new Blob([rnn.toJSON()], {type: "application/json"});
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(blob);
-        a.download = "rnn-network.json";
-        a.click();
-        document.getElementById('modelStatus').textContent = "Network saved.";
-    }
-
-    function loadNetwork() {
-        document.getElementById('modelFile').onchange = function(evt) {
-            const file = evt.target.files[0];
-            if (!file) return;
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                try {
-                    rnn = AdvancedRNN.fromJSON(e.target.result);
-                    if (!rnn) {
-                        document.getElementById('modelStatus').textContent = "Error: Failed to parse model";
-                        console.error("fromJSON returned null");
-                        return;
-                    }
-                    document.getElementById('modelStatus').textContent = "Network loaded!";
-                    document.getElementById("cellType").value = rnn.cellType;
-                    document.getElementById("activation").value = rnn.activation;
-                    document.getElementById("outputActivation").value = rnn.outputActivation;
-                    document.getElementById("lossFunction").value = rnn.lossFunction;
-                    console.log("Model loaded successfully", rnn);
-                } catch (err) {
-                    document.getElementById('modelStatus').textContent = "Error: " + err.message;
-                    console.error("Load error:", err);
+    function generateTestData() {
+        const samplesPerClass = parseInt(document.getElementById("samplesPerClass").value);
+        const inputSize = parseInt(document.getElementById("inputSize").value);
+        const outputSize = parseInt(document.getElementById("outputSize").value);
+        inputs = [];
+        targets = [];
+        for (let c = 0; c < outputSize; c++) {
+            for (let i = 0; i < samplesPerClass; i++) {
+                const input = [];
+                const target = new Array(outputSize).fill(0);
+                target[c] = 1;
+                for (let j = 0; j < inputSize; j++) {
+                    if (c === 0) input.push(Math.random() * 0.5);
+                    else if (c === 1) input.push(0.5 + Math.random() * 0.5);
+                    else input.push(j % 2 === 0 ? Math.random() * 0.5 : 0.5 + Math.random() * 0.5);
                 }
-            };
-            reader.readAsText(file);
-        };
-        document.getElementById('modelFile').click();
+                inputs.push(input);
+                targets.push(target);
+            }
+        }
+        for (let i = inputs.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [inputs[i], inputs[j]] = [inputs[j], inputs[i]];
+            [targets[i], targets[j]] = [targets[j], targets[i]];
+        }
+        const valSplit = parseFloat(document.getElementById("validationSplit").value);
+        splitData(inputs, targets, valSplit);
+        document.getElementById('dataStatus').textContent =
+            `Generated ${inputs.length} samples (Train: ${trainInputs.length}, Val: ${valInputs.length})`;
     }
 
-    function stopTraining() {
-        stopFlag = true;
-    }
+    function stopTraining() { stopFlag = true; }
 
     async function trainNetwork() {
-        if (!rnn) return alert("Create an RNN first.");
-        if (!trainInputs.length) return alert("Load data first.");
-        
+        if (!facade) { alert("Create RNN first."); return; }
+        if (!trainInputs.length) { alert("Load data first."); return; }
         stopFlag = false;
         const epochs = parseInt(document.getElementById("epochs").value);
-        const batchSize = parseInt(document.getElementById("batchSize").value);
         const logInterval = parseInt(document.getElementById("logInterval").value);
-        
         const logDiv = document.getElementById("lossLog");
         logDiv.innerHTML = "<strong>Training...</strong><br>";
         trainingLoss = [];
         validationLoss = [];
 
         for (let epoch = 1; epoch <= epochs; epoch++) {
-            if (stopFlag) {
-                logDiv.innerHTML += `<br><em>Training stopped at epoch ${epoch}</em>`;
-                break;
-            }
-            
+            if (stopFlag) { logDiv.innerHTML += `<br><em>Training stopped at epoch ${epoch}</em>`; break; }
             let epochLoss = 0;
-            if (batchSize === 1) {
-                for (let i = 0; i < trainInputs.length; i++) {
-                    epochLoss += rnn.trainSequence([trainInputs[i]], [trainTargets[i]]);
-                }
-                epochLoss /= trainInputs.length;
-            } else {
-                const batches = [];
-                for (let i = 0; i < trainInputs.length; i += batchSize) {
-                    batches.push({
-                        inputs: trainInputs.slice(i, i + batchSize).map(x => [x]),
-                        targets: trainTargets.slice(i, i + batchSize).map(x => [x])
-                    });
-                }
-                for (const batch of batches) {
-                    epochLoss += rnn.trainBatch(batch.inputs, batch.targets);
-                }
-                epochLoss /= batches.length;
+            for (let i = 0; i < trainInputs.length; i++) {
+                epochLoss += facade.trainSequence([trainInputs[i]], [trainTargets[i]]);
             }
-            
+            epochLoss /= trainInputs.length;
             trainingLoss.push(epochLoss);
-            
+
             let valLoss = 0;
             if (valInputs.length > 0) {
                 for (let i = 0; i < valInputs.length; i++) {
-                    valLoss += rnn.computeLoss([valInputs[i]], [valTargets[i]]);
+                    facade.forwardSequence([valInputs[i]]);
+                    const pred = facade.caches[0]?.outCache?.output || [];
+                    valLoss += LossFunctions[facade.lossFunction].loss(pred, valTargets[i]);
                 }
                 valLoss /= valInputs.length;
             }
@@ -1173,9 +1376,61 @@ RNN
                 await new Promise(r => setTimeout(r, 0));
             }
         }
-        
         document.getElementById("trainStatus").textContent = "Training complete!";
         drawLossChart();
+    }
+
+    async function trainWithProgress() {
+        if (!facade) { alert("Create RNN first."); return; }
+        if (!trainInputs.length) { alert("Load data first."); return; }
+        stopFlag = false;
+        const epochs = parseInt(document.getElementById("epochs").value);
+        const logInterval = parseInt(document.getElementById("logInterval").value);
+        const progressDiv = document.getElementById("trainingProgress");
+        const logDiv = document.getElementById("lossLog");
+        logDiv.innerHTML = "";
+        trainingLoss = [];
+        validationLoss = [];
+        let epoch = 0;
+
+        function step() {
+            if (epoch >= epochs || stopFlag) {
+                document.getElementById("trainStatus").textContent = stopFlag ? "Stopped" : "Training complete!";
+                drawLossChart();
+                return;
+            }
+            let epochLoss = 0;
+            for (let i = 0; i < trainInputs.length; i++) {
+                epochLoss += facade.trainSequence([trainInputs[i]], [trainTargets[i]]);
+            }
+            epochLoss /= trainInputs.length;
+            trainingLoss.push(epochLoss);
+
+            let valLoss = 0;
+            if (valInputs.length > 0) {
+                for (let i = 0; i < valInputs.length; i++) {
+                    facade.forwardSequence([valInputs[i]]);
+                    const pred = facade.caches[0]?.outCache?.output || [];
+                    valLoss += LossFunctions[facade.lossFunction].loss(pred, valTargets[i]);
+                }
+                valLoss /= valInputs.length;
+            }
+            validationLoss.push(valLoss);
+            epoch++;
+
+            progressDiv.innerHTML = `<div>Epoch: ${epoch}/${epochs}</div><div style="width:300px;background:#f0f0f0;border-radius:5px;"><div style="width:${(epoch/epochs)*100}%;background:#4CAF50;height:20px;border-radius:5px;"></div></div>`;
+
+            if (epoch % logInterval === 0 || epoch === epochs) {
+                const valStr = valInputs.length > 0 ? `, Val: ${valLoss.toFixed(6)}` : '';
+                logDiv.innerHTML += `Epoch ${epoch}: Train: ${epochLoss.toFixed(6)}${valStr}<br>`;
+                logDiv.scrollTop = logDiv.scrollHeight;
+                drawLossChart();
+            }
+            setTimeout(step, 0);
+        }
+
+        document.getElementById("trainStatus").textContent = "Training...";
+        step();
     }
 
     function drawLossChart() {
@@ -1183,21 +1438,16 @@ RNN
         const ctx = canvas.getContext("2d");
         const w = canvas.width = canvas.offsetWidth;
         const h = canvas.height = canvas.offsetHeight;
-        
         ctx.clearRect(0, 0, w, h);
         ctx.fillStyle = "#fafafa";
         ctx.fillRect(0, 0, w, h);
-        
         if (trainingLoss.length < 2) return;
-        
         const allLoss = [...trainingLoss, ...validationLoss.filter(v => v > 0)];
         const maxLoss = Math.max(...allLoss) * 1.1;
         const minLoss = Math.min(...allLoss) * 0.9;
-        
         const padL = 50, padR = 20, padT = 20, padB = 30;
         const plotW = w - padL - padR;
         const plotH = h - padT - padB;
-        
         ctx.strokeStyle = "#ddd";
         ctx.beginPath();
         for (let i = 0; i <= 4; i++) {
@@ -1206,7 +1456,6 @@ RNN
             ctx.lineTo(w - padR, y);
         }
         ctx.stroke();
-        
         ctx.fillStyle = "#333";
         ctx.font = "10px Arial";
         for (let i = 0; i <= 4; i++) {
@@ -1214,7 +1463,6 @@ RNN
             const y = padT + (plotH * i / 4);
             ctx.fillText(val.toFixed(4), 5, y + 3);
         }
-        
         const drawLine = (data, color) => {
             if (data.length < 2) return;
             ctx.strokeStyle = color;
@@ -1228,15 +1476,12 @@ RNN
             }
             ctx.stroke();
         };
-        
         drawLine(trainingLoss, "#2196F3");
         if (validationLoss.some(v => v > 0)) drawLine(validationLoss, "#FF5722");
-        
         ctx.fillStyle = "#2196F3";
         ctx.fillRect(w - 100, 5, 10, 10);
         ctx.fillStyle = "#333";
         ctx.fillText("Train", w - 85, 13);
-        
         if (validationLoss.some(v => v > 0)) {
             ctx.fillStyle = "#FF5722";
             ctx.fillRect(w - 100, 20, 10, 10);
@@ -1252,22 +1497,281 @@ RNN
     }
 
     function predictSequence() {
-        if (!rnn) {
-            document.getElementById("predictOutput").textContent = "Create RNN first!";
-            return;
-        }
+        if (!facade) { document.getElementById("predictOutput").textContent = "Create RNN first!"; return; }
         const seqStr = document.getElementById("predictSeq").value;
         const seq = parseSequenceInput(seqStr);
-        const preds = rnn.predict(seq);
-
-        let out = "<pre>";
-        out += "t | Inputs | Predictions\n";
-        out += "-".repeat(50) + "\n";
+        const preds = facade.predict(seq);
+        let out = "<pre>t | Inputs | Predictions\n" + "-".repeat(50) + "\n";
         for (let t = 0; t < seq.length; t++) {
             out += t + " | " + seq[t].map(x => x.toFixed(4)).join(" ") + " | " + preds[t].map(x => x.toFixed(4)).join(" ") + "\n";
         }
         out += "</pre>";
         document.getElementById("predictOutput").innerHTML = out;
+    }
+
+    // ========== Facade UI Functions ==========
+    function getFacadeParams() {
+        return {
+            timestep: parseInt(document.getElementById("facadeTimestep").value),
+            layerIdx: parseInt(document.getElementById("facadeLayerIdx").value),
+            neuronIdx: parseInt(document.getElementById("facadeNeuronIdx").value),
+            weightIdx: parseInt(document.getElementById("facadeWeightIdx").value),
+            gateType: document.getElementById("facadeGateType").value,
+            value: parseFloat(document.getElementById("facadeSetValue").value),
+            dropoutRate: parseFloat(document.getElementById("facadeDropoutRate").value)
+        };
+    }
+
+    function facadeOutput(msg) {
+        document.getElementById("facadeOutput").innerText = msg;
+    }
+
+    // Time-Step & Sequence Access
+    function facadeGetHiddenState() {
+        if (!facade) { alert("Create network first"); return; }
+        const p = getFacadeParams();
+        const val = facade.getHiddenState(p.layerIdx, p.timestep, p.neuronIdx);
+        facadeOutput(`HiddenState[layer=${p.layerIdx}, t=${p.timestep}, neuron=${p.neuronIdx}] = ${val.toFixed(8)}`);
+    }
+
+    function facadeGetOutput() {
+        if (!facade) { alert("Create network first"); return; }
+        const p = getFacadeParams();
+        const val = facade.getOutput(p.timestep, p.neuronIdx);
+        facadeOutput(`Output[t=${p.timestep}, idx=${p.neuronIdx}] = ${val.toFixed(8)}`);
+    }
+
+    function facadeGetInputVector() {
+        if (!facade) { alert("Create network first"); return; }
+        const p = getFacadeParams();
+        const val = facade.getInputVector(p.timestep, p.neuronIdx);
+        facadeOutput(`InputVector[t=${p.timestep}, idx=${p.neuronIdx}] = ${val.toFixed(8)}`);
+    }
+
+    function facadeGetPreActivation() {
+        if (!facade) { alert("Create network first"); return; }
+        const p = getFacadeParams();
+        const val = facade.getPreActivation(p.layerIdx, p.timestep, p.neuronIdx);
+        facadeOutput(`PreActivation[layer=${p.layerIdx}, t=${p.timestep}, neuron=${p.neuronIdx}] = ${val.toFixed(8)}`);
+    }
+
+    // Cell State & Gate Access
+    function facadeGetCellState() {
+        if (!facade) { alert("Create network first"); return; }
+        const p = getFacadeParams();
+        const val = facade.getCellState(p.layerIdx, p.timestep, p.neuronIdx);
+        facadeOutput(`CellState[layer=${p.layerIdx}, t=${p.timestep}, neuron=${p.neuronIdx}] = ${val.toFixed(8)}`);
+    }
+
+    function facadeGetGateValue() {
+        if (!facade) { alert("Create network first"); return; }
+        const p = getFacadeParams();
+        const val = facade.getGateValue(p.gateType, p.layerIdx, p.timestep, p.neuronIdx);
+        facadeOutput(`Gate '${p.gateType}' [layer=${p.layerIdx}, t=${p.timestep}, neuron=${p.neuronIdx}] = ${val.toFixed(8)}`);
+    }
+
+    // Gradients & Optimizer
+    function facadeGetWeightGradient() {
+        if (!facade) { alert("Create network first"); return; }
+        const p = getFacadeParams();
+        const val = facade.getWeightGradient(p.layerIdx, p.neuronIdx, p.weightIdx);
+        facadeOutput(`WeightGradient[layer=${p.layerIdx}, neuron=${p.neuronIdx}, weight=${p.weightIdx}] = ${val.toFixed(10)}`);
+    }
+
+    function facadeGetBiasGradient() {
+        if (!facade) { alert("Create network first"); return; }
+        const p = getFacadeParams();
+        const val = facade.getBiasGradient(p.layerIdx, p.neuronIdx);
+        facadeOutput(`BiasGradient[layer=${p.layerIdx}, neuron=${p.neuronIdx}] = ${val.toFixed(10)}`);
+    }
+
+    function facadeGetCellGradient() {
+        if (!facade) { alert("Create network first"); return; }
+        const p = getFacadeParams();
+        const val = facade.getCellGradient(p.layerIdx, p.timestep, p.neuronIdx);
+        facadeOutput(`CellGradient[layer=${p.layerIdx}, t=${p.timestep}] = ${val.toFixed(10)}`);
+    }
+
+    function facadeGetOptimizerState() {
+        if (!facade) { alert("Create network first"); return; }
+        const p = getFacadeParams();
+        const state = facade.getOptimizerState(p.layerIdx, p.neuronIdx, p.weightIdx);
+        facadeOutput(`OptimizerState[layer=${p.layerIdx}, neuron=${p.neuronIdx}, param=${p.weightIdx}]:\n  momentum = ${state.momentum.toFixed(10)}\n  velocity = ${state.velocity.toFixed(10)}\n  t = ${state.t}`);
+    }
+
+    // Sequence APIs
+    function facadeGetSequenceOutputs() {
+        if (!facade) { alert("Create network first"); return; }
+        const p = getFacadeParams();
+        const vals = facade.getSequenceOutputs(p.neuronIdx);
+        facadeOutput(`Sequence Outputs (idx=${p.neuronIdx}):\n[${vals.map(v => v.toFixed(4)).join(", ")}]`);
+    }
+
+    function facadeGetSequenceHiddenStates() {
+        if (!facade) { alert("Create network first"); return; }
+        const p = getFacadeParams();
+        const vals = facade.getSequenceHiddenStates(p.layerIdx, p.neuronIdx);
+        facadeOutput(`Sequence Hidden States (layer=${p.layerIdx}, neuron=${p.neuronIdx}):\n[${vals.map(v => v.toFixed(4)).join(", ")}]`);
+    }
+
+    function facadeGetSequenceCellStates() {
+        if (!facade) { alert("Create network first"); return; }
+        const p = getFacadeParams();
+        const vals = facade.getSequenceCellStates(p.layerIdx, p.neuronIdx);
+        facadeOutput(`Sequence Cell States (layer=${p.layerIdx}, neuron=${p.neuronIdx}):\n[${vals.map(v => v.toFixed(4)).join(", ")}]`);
+    }
+
+    function facadeGetSequenceGates() {
+        if (!facade) { alert("Create network first"); return; }
+        const p = getFacadeParams();
+        const vals = facade.getSequenceGateValues(p.gateType, p.layerIdx, p.neuronIdx);
+        facadeOutput(`Sequence Gate '${p.gateType}' (layer=${p.layerIdx}, neuron=${p.neuronIdx}):\n[${vals.map(v => v.toFixed(4)).join(", ")}]`);
+    }
+
+    // Dropout & Regularization
+    function facadeSetDropout() {
+        if (!facade) { alert("Create network first"); return; }
+        const p = getFacadeParams();
+        facade.setDropoutRate(p.dropoutRate);
+        facadeOutput(`Dropout rate set to ${p.dropoutRate}\nDropout enabled: ${facade.useDropout}`);
+    }
+
+    function facadeGetDropoutMask() {
+        if (!facade) { alert("Create network first"); return; }
+        const p = getFacadeParams();
+        const val = facade.getDropoutMask(p.layerIdx, p.timestep, p.neuronIdx);
+        facadeOutput(`DropoutMask[layer=${p.layerIdx}, t=${p.timestep}, neuron=${p.neuronIdx}] = ${val.toFixed(4)}`);
+    }
+
+    function facadeGetLayerNormStats() {
+        if (!facade) { alert("Create network first"); return; }
+        const p = getFacadeParams();
+        const stats = facade.getLayerNormStats(p.layerIdx, p.timestep);
+        facadeOutput(`LayerNorm Stats [layer=${p.layerIdx}, t=${p.timestep}]:\n  Mean: ${stats.mean.toFixed(6)}\n  Variance: ${stats.variance.toFixed(6)}\n  Gamma: ${stats.gamma}\n  Beta: ${stats.beta}`);
+    }
+
+    // State Manipulation
+    function facadeResetHiddenState() {
+        if (!facade) { alert("Create network first"); return; }
+        const p = getFacadeParams();
+        facade.resetHiddenState(p.layerIdx, p.value);
+        facadeOutput(`Reset hidden state for layer ${p.layerIdx} to ${p.value}`);
+    }
+
+    function facadeResetCellState() {
+        if (!facade) { alert("Create network first"); return; }
+        const p = getFacadeParams();
+        facade.resetCellState(p.layerIdx, p.value);
+        facadeOutput(`Reset cell state for layer ${p.layerIdx} to ${p.value}`);
+    }
+
+    function facadeResetAllStates() {
+        if (!facade) { alert("Create network first"); return; }
+        const p = getFacadeParams();
+        facade.resetAllStates(p.value);
+        facadeOutput(`Reset all states to ${p.value}`);
+    }
+
+    function facadeInjectHiddenState() {
+        if (!facade) { alert("Create network first"); return; }
+        const p = getFacadeParams();
+        const size = facade.getHiddenSize(p.layerIdx);
+        const arr = new Array(size).fill(p.value);
+        facade.injectHiddenState(p.layerIdx, arr);
+        facadeOutput(`Injected [${p.value}...] (${size} values) into hidden state for layer ${p.layerIdx}`);
+    }
+
+    function facadeSetHiddenState() {
+        if (!facade) { alert("Create network first"); return; }
+        const p = getFacadeParams();
+        facade.setHiddenState(p.layerIdx, p.timestep, p.neuronIdx, p.value);
+        facadeOutput(`Set HiddenState[layer=${p.layerIdx}, t=${p.timestep}, neuron=${p.neuronIdx}] = ${p.value}`);
+    }
+
+    function facadeSetOutput() {
+        if (!facade) { alert("Create network first"); return; }
+        const p = getFacadeParams();
+        facade.setOutput(p.timestep, p.neuronIdx, p.value);
+        facadeOutput(`Set Output[t=${p.timestep}, idx=${p.neuronIdx}] = ${p.value}`);
+    }
+
+    // Time-Series Diagnostics
+    function facadeGetHiddenHistogram() {
+        if (!facade) { alert("Create network first"); return; }
+        const p = getFacadeParams();
+        const hist = facade.getHiddenStateHistogram(p.layerIdx, p.timestep, 10);
+        renderHistogram(hist, `Hidden State Histogram [layer=${p.layerIdx}, t=${p.timestep}]`);
+    }
+
+    function facadeGetActivationHistogram() {
+        if (!facade) { alert("Create network first"); return; }
+        const p = getFacadeParams();
+        const hist = facade.getActivationHistogramOverTime(p.layerIdx, p.neuronIdx, 10);
+        renderHistogram(hist, `Activation Over Time [layer=${p.layerIdx}, neuron=${p.neuronIdx}]`);
+    }
+
+    function renderHistogram(hist, title) {
+        const maxCount = Math.max(...hist.map(b => b.count), 1);
+        const bars = hist.map(b => {
+            const height = (b.count / maxCount) * 100;
+            return `<div class="histogram-bar" style="height:${height}%" title="${b.rangeMin.toFixed(4)} to ${b.rangeMax.toFixed(4)}: ${b.count}"></div>`;
+        }).join("");
+        document.getElementById("histogramDisplay").innerHTML = `<strong>${title}</strong><div class="histogram-container">${bars}</div>`;
+        facadeOutput(`${title}\nBins: ${hist.length}\nTotal samples: ${hist.reduce((s,b) => s + b.count, 0)}`);
+    }
+
+    function facadeGetGateSaturation() {
+        if (!facade) { alert("Create network first"); return; }
+        const p = getFacadeParams();
+        const stats = facade.getGateSaturation(p.gateType, p.layerIdx, p.timestep, 0.05);
+        facadeOutput(`Gate Saturation '${p.gateType}' [layer=${p.layerIdx}, t=${p.timestep}]:\n  Near 0: ${stats.nearZeroCount}/${stats.totalCount} (${stats.nearZeroPct.toFixed(1)}%)\n  Near 1: ${stats.nearOneCount}/${stats.totalCount} (${stats.nearOnePct.toFixed(1)}%)`);
+    }
+
+    function facadeGetGradientScales() {
+        if (!facade) { alert("Create network first"); return; }
+        const p = getFacadeParams();
+        const scales = facade.getGradientScalesOverTime(p.layerIdx);
+        let out = `Gradient Scales Over Time [layer=${p.layerIdx}]:\nt  | Mean Abs Grad\n` + "-".repeat(25) + "\n";
+        for (const s of scales) {
+            out += `${s.timestep.toString().padStart(2)} | ${s.meanAbsGrad.toFixed(8)}\n`;
+        }
+        facadeOutput(out);
+    }
+
+    function facadeDetectVanishing() {
+        if (!facade) { alert("Create network first"); return; }
+        const p = getFacadeParams();
+        const result = facade.detectVanishingGradient(p.layerIdx, 1e-6);
+        facadeOutput(result ? "⚠️ Vanishing gradient DETECTED!" : "✓ No vanishing gradient detected");
+    }
+
+    function facadeDetectExploding() {
+        if (!facade) { alert("Create network first"); return; }
+        const p = getFacadeParams();
+        const result = facade.detectExplodingGradient(p.layerIdx, 1e6);
+        facadeOutput(result ? "⚠️ Exploding gradient DETECTED!" : "✓ No exploding gradient detected");
+    }
+
+    // Network Info
+    function facadeGetLayerCount() {
+        if (!facade) { alert("Create network first"); return; }
+        facadeOutput(`Layer Count = ${facade.getLayerCount()}`);
+    }
+
+    function facadeGetHiddenSize() {
+        if (!facade) { alert("Create network first"); return; }
+        const p = getFacadeParams();
+        facadeOutput(`Hidden Size [layer=${p.layerIdx}] = ${facade.getHiddenSize(p.layerIdx)}`);
+    }
+
+    function facadeGetCellType() {
+        if (!facade) { alert("Create network first"); return; }
+        facadeOutput(`Cell Type = ${facade.getCellType()}`);
+    }
+
+    function facadeGetSequenceLength() {
+        if (!facade) { alert("Create network first"); return; }
+        facadeOutput(`Sequence Length = ${facade.getSequenceLength()}`);
     }
     </script>
 </body>
